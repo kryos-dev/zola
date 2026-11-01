@@ -12,7 +12,6 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
-import { useChatSession } from "@/lib/chat-store/session/provider"
 import { textFromMessage } from "@/lib/chat-store/messages/api"
 import { parseCanvasSegments } from "@/lib/canvas/parse"
 import { chunkForSpeech } from "@/lib/speech-chunks"
@@ -148,19 +147,18 @@ export const MessageAssistant = memo(function MessageAssistant({
   const { copied, copy: copyToClipboard } = useCopy(answerText)
   const contentNullOrEmpty = answerText === ""
   const turn = turnFromParts(parts)
-  const { chatId } = useChatSession()
   const { openCanvas } = useWorkspace()
   const handleOpenInCanvas = useCallback(async () => {
-    if (!chatId || contentNullOrEmpty) return
+    if (contentNullOrEmpty) return
     const res = await fetch("/api/cloud9/canvas", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chatId, title: "Untitled", content: answerText }),
+      body: JSON.stringify({ title: "Untitled", content: answerText }),
     })
     if (!res.ok) return
     const canvas = await res.json()
     openCanvas(canvas.id, canvas.title, canvas.content)
-  }, [chatId, contentNullOrEmpty, answerText, openCanvas])
+  }, [contentNullOrEmpty, answerText, openCanvas])
 
   const isQuoteEnabled = !preferences.multiModelEnabled
   const messageRef = useRef<HTMLDivElement>(null)

@@ -209,9 +209,9 @@ export const messageFeedback = pgTable(
 
 export const canvases = pgTable("canvases", {
   id: uuid("id").primaryKey().defaultRandom(),
-  chatId: uuid("chat_id")
+  userId: uuid("user_id")
     .notNull()
-    .references(() => chats.id, { onDelete: "cascade" }),
+    .references(() => users.id, { onDelete: "cascade" }),
   title: text("title").notNull().default("Untitled"),
   content: text("content").notNull().default(""),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),

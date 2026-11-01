@@ -17,21 +17,12 @@ export async function PATCH(request: Request, { params }: Params) {
   if (typeof body.title === "string") updates.title = body.title
   if (typeof body.content === "string") updates.content = body.content
 
-  // Ownership check via a join: the canvas's chat must belong to this user.
   const [canvas] = await db
     .update(schema.canvases)
     .set(updates)
-    .from(schema.chats)
-    .where(
-      and(
-        eq(schema.canvases.id, id),
-        eq(schema.canvases.chatId, schema.chats.id),
-        eq(schema.chats.userId, user.id)
-      )
-    )
+    .where(and(eq(schema.canvases.id, id), eq(schema.canvases.userId, user.id)))
     .returning({
       id: schema.canvases.id,
-      chatId: schema.canvases.chatId,
       title: schema.canvases.title,
       content: schema.canvases.content,
       updatedAt: schema.canvases.updatedAt,

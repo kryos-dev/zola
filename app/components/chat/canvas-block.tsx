@@ -7,7 +7,6 @@ import {
   ArtifactHeader,
   ArtifactTitle,
 } from "@/components/ai-elements/artifact"
-import { useChatSession } from "@/lib/chat-store/session/provider"
 import { FileTextIcon } from "lucide-react"
 import { useEffect, useRef } from "react"
 
@@ -32,7 +31,6 @@ export function CanvasBlock({
   /** True while the parent assistant message is still streaming. */
   streaming: boolean
 }) {
-  const { chatId } = useChatSession()
   const { openCanvas, updateCanvasContent } = useWorkspace()
   const canvasRef = useRef<Promise<UpsertedCanvas | null> | null>(null)
   // True only for a block seen streaming in this session; a reloaded chat
@@ -43,20 +41,19 @@ export function CanvasBlock({
   const latest = useRef({ title, content })
   latest.current = { title, content }
 
-  // ponytail: "the chat's canvas" = most recently updated row for this chat
+  // ponytail: "the user's canvas" = most recently updated row for this user
   // (see route comment); a per-turn canvasId thread would be more precise if
-  // multiple canvases per chat becomes a real use case.
+  // multiple canvases becomes a real use case.
   const resolveCanvas = () => {
-    if (!chatId) return Promise.resolve(null)
     canvasRef.current ??= (async () => {
       try {
-        const listRes = await fetch(`/api/cloud9/canvas?chatId=${encodeURIComponent(chatId)}`)
+        const listRes = await fetch("/api/cloud9/canvas")
         const existing = listRes.ok ? ((await listRes.json()) as UpsertedCanvas[]) : []
         if (existing[0]) return existing[0]
         const res = await fetch("/api/cloud9/canvas", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ chatId, ...latest.current }),
+          body: JSON.stringify(latest.current),
         })
         return res.ok ? ((await res.json()) as UpsertedCanvas) : null
       } catch {
@@ -71,13 +68,13 @@ export function CanvasBlock({
 
   // Open the pane the moment the block starts streaming.
   useEffect(() => {
-    if (!streaming || liveRef.current || !chatId) return
+    if (!streaming || liveRef.current) return
     liveRef.current = true
     void resolveCanvas().then((canvas) => {
       if (canvas) openCanvas(canvas.id, latest.current.title, latest.current.content)
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [streaming, chatId])
+  }, [streaming])
 
   // Follow the streaming text into the tab. updateCanvasContent is a no-op
   // once the user closed the tab, so this never reopens it.
@@ -110,7 +107,7 @@ export function CanvasBlock({
       updateCanvasContent(canvas.id, c, t)
     })
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [complete, streaming, chatId])
+  }, [complete, streaming])
 
   const open = () => {
     void resolveCanvas().then((canvas) => {
