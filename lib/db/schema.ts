@@ -1,11 +1,9 @@
 import {
   boolean,
-  index,
   integer,
   jsonb,
   pgTable,
   primaryKey,
-  serial,
   text,
   timestamp,
   uuid,
@@ -69,39 +67,6 @@ export const projectFiles = pgTable("project_files", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 })
 
-export const chats = pgTable(
-  "chats",
-  {
-    id: uuid("id").primaryKey().defaultRandom(),
-    userId: uuid("user_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
-    projectId: uuid("project_id").references(() => projects.id, {
-      onDelete: "set null",
-    }),
-    title: text("title"),
-    model: text("model"),
-    systemPrompt: text("system_prompt"),
-    public: boolean("public").default(false),
-    pinned: boolean("pinned").notNull().default(false),
-    pinnedAt: timestamp("pinned_at", { withTimezone: true }),
-    // The SSE stream currently in flight for this chat, if any. Set when a reply
-    // starts, cleared when it is persisted. A client returning to the chat asks
-    // GET /api/chat/[chatId]/stream, which reads this and re-attaches.
-    activeStreamId: text("active_stream_id"),
-    // The Hermes session that holds this chat's conversation server-side.
-    hermesSessionId: text("hermes_session_id"),
-    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
-    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
-  },
-  // A foreign key does not index the column that holds it. The sidebar runs
-  // `where user_id = $1 order by pinned, pinned_at, updated_at` on every page
-  // load and had nothing to use.
-  // DESC to match 0014 and the sidebar's `order by updated_at desc`; the
-  // declaration and the migration must agree or drizzle-kit wants to rebuild it.
-  (t) => [index("chats_user_id_updated_at_idx").on(t.userId, t.updatedAt.desc())]
-)
-
 // The one rolling Hermes session each user talks to; Hermes holds the transcript.
 export const userSessions = pgTable(
   "user_sessions",
@@ -121,32 +86,6 @@ export const userSessions = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.userId, t.profile] })]
-)
-
-export const messages = pgTable(
-  "messages",
-  {
-    id: serial("id").primaryKey(),
-    chatId: uuid("chat_id")
-      .notNull()
-      .references(() => chats.id, { onDelete: "cascade" }),
-    userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
-    role: text("role").notNull(),
-    content: text("content"),
-    experimentalAttachments: jsonb("experimental_attachments"),
-    parts: jsonb("parts"),
-    messageGroupId: text("message_group_id"),
-    model: text("model"),
-    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
-  },
-  // Postgres indexes the key a foreign key POINTS AT, never the column that
-  // holds it, so chat_id had no index at all. Composite in query order:
-  // equality first, then both sort columns, so one index serves
-  // `where chat_id = $1 order by created_at, id` without a sort step.
-  (t) => [
-    index("messages_chat_id_created_at_id_idx").on(t.chatId, t.createdAt, t.id),
-    index("messages_user_id_idx").on(t.userId),
-  ]
 )
 
 export const userKeys = pgTable(
@@ -189,32 +128,6 @@ export const feedback = pgTable("feedback", {
   createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 })
 
-// A thumbs up / thumbs down on ONE assistant message, which the existing
-// `feedback` table above cannot express -- that one is free-text app feedback
-// with no message attached.
-//
-// Keyed on (message_ref, user_id) so a second vote replaces the first instead of
-// stacking, and so "what did this user think of this message" is a primary-key
-// lookup. rating is -1 or 1; clearing a vote deletes the row rather than
-// storing a third state nobody asked for.
-export const messageFeedback = pgTable(
-  "message_feedback",
-  {
-    // "12" for a row Zola stored, "h345" for a Hermes transcript row.
-    messageRef: text("message_ref").notNull(),
-    chatId: uuid("chat_id")
-      .notNull()
-      .references(() => chats.id, { onDelete: "cascade" }),
-    userId: uuid("user_id")
-      .notNull()
-      .references(() => users.id, { onDelete: "cascade" }),
-    rating: integer("rating").notNull(),
-    note: text("note"),
-    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
-  },
-  (table) => [primaryKey({ columns: [table.messageRef, table.userId] })]
-)
-
 export const canvases = pgTable("canvases", {
   id: uuid("id").primaryKey().defaultRandom(),
   userId: uuid("user_id")
@@ -223,21 +136,6 @@ export const canvases = pgTable("canvases", {
   title: text("title").notNull().default("Untitled"),
   content: text("content").notNull().default(""),
   updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
-})
-
-export const chatAttachments = pgTable("chat_attachments", {
-  id: uuid("id").primaryKey().defaultRandom(),
-  chatId: uuid("chat_id")
-    .notNull()
-    .references(() => chats.id, { onDelete: "cascade" }),
-  userId: uuid("user_id")
-    .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
-  fileUrl: text("file_url").notNull(),
-  fileName: text("file_name"),
-  fileType: text("file_type"),
-  fileSize: integer("file_size"),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
 })
 
 // Passkeys. One row per authenticator a person has enrolled, so a phone and a

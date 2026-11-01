@@ -40,54 +40,6 @@ export type Database = {
           },
         ]
       }
-      chat_attachments: {
-        Row: {
-          chat_id: string
-          created_at: string
-          file_name: string | null
-          file_size: number | null
-          file_type: string | null
-          file_url: string
-          id: string
-          user_id: string
-        }
-        Insert: {
-          chat_id: string
-          created_at?: string
-          file_name?: string | null
-          file_size?: number | null
-          file_type?: string | null
-          file_url: string
-          id?: string
-          user_id: string
-        }
-        Update: {
-          chat_id?: string
-          created_at?: string
-          file_name?: string | null
-          file_size?: number | null
-          file_type?: string | null
-          file_url?: string
-          id?: string
-          user_id?: string
-        }
-        Relationships: [
-          {
-            foreignKeyName: "fk_chat"
-            columns: ["chat_id"]
-            isOneToOne: false
-            referencedRelation: "chats"
-            referencedColumns: ["id"]
-          },
-          {
-            foreignKeyName: "fk_user"
-            columns: ["user_id"]
-            isOneToOne: false
-            referencedRelation: "users"
-            referencedColumns: ["id"]
-          },
-        ]
-      }
       chats: {
         Row: {
           created_at: string | null

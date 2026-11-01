@@ -1,6 +1,6 @@
 import { getCurrentUser } from "@/lib/auth"
 import { db, schema } from "@/lib/db"
-import { asc, eq, max } from "drizzle-orm"
+import { asc, eq } from "drizzle-orm"
 import { NextResponse } from "next/server"
 
 export async function POST(request: Request) {
@@ -38,9 +38,7 @@ export async function GET() {
   const user = await getCurrentUser()
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
-  // "Updated X ago" is the latest chat's updated_at, not a column on the
-  // project itself -- a project with no chats yet has none, which is what the
-  // left join + null result gives for free.
+  // projects has no updated_at of its own, so the list reports createdAt.
   const rows = await db
     .select({
       id: schema.projects.id,
@@ -49,19 +47,10 @@ export async function GET() {
       systemPrompt: schema.projects.systemPrompt,
       userId: schema.projects.userId,
       createdAt: schema.projects.createdAt,
-      updatedAt: max(schema.chats.updatedAt),
+      updatedAt: schema.projects.createdAt,
     })
     .from(schema.projects)
-    .leftJoin(schema.chats, eq(schema.chats.projectId, schema.projects.id))
     .where(eq(schema.projects.userId, user.id))
-    .groupBy(
-      schema.projects.id,
-      schema.projects.name,
-      schema.projects.description,
-      schema.projects.systemPrompt,
-      schema.projects.userId,
-      schema.projects.createdAt
-    )
     .orderBy(asc(schema.projects.createdAt))
 
   return NextResponse.json(rows)
