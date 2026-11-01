@@ -14,6 +14,7 @@ import { APP_DOMAIN, APP_NAME } from "@/lib/config"
 import { getUserProfile } from "@/lib/user/api"
 import { ThemeProvider } from "next-themes"
 import { LayoutClient } from "./layout-client"
+import { PwaRegister } from "./components/pwa-register"
 
 // Inter, as Linear uses. The CSS variable keeps its old name so nothing that
 // reads --font-geist-sans has to change.
@@ -34,7 +35,8 @@ export const metadata: Metadata = {
   title: APP_NAME,
   description: `${APP_NAME} is the web interface for the Hermes agent.`,
   manifest: "/manifest.webmanifest",
-  icons: { apple: "/icons/icon-192.png" },
+  // Caddyfile serves /manifest.webmanifest and /icons/* without auth, so no crossOrigin is needed.
+  icons: { apple: "/icons/apple-touch-icon.png" },
   appleWebApp: { capable: true, title: APP_NAME, statusBarStyle: "default" },
 }
 
@@ -65,6 +67,7 @@ export default async function RootLayout({
       <body className="font-sans antialiased">
         <TanstackQueryProvider>
           <LayoutClient />
+          <PwaRegister />
           <UserProvider initialUser={userProfile}>
             <ModelProvider>
               <ChatsProvider userId={userProfile?.id}>

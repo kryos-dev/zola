@@ -17,6 +17,9 @@ const nextConfig: NextConfig = withBundleAnalyzer({
   experimental: {
     optimizePackageImports: ["@phosphor-icons/react"],
   },
+  async headers() {
+    return [{ source: "/sw.js", headers: [{ key: "Cache-Control", value: "no-cache" }] }]
+  },
   serverExternalPackages: ["shiki", "vscode-oniguruma", "postgres"],
 })
 
