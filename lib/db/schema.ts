@@ -102,6 +102,19 @@ export const chats = pgTable(
   (t) => [index("chats_user_id_updated_at_idx").on(t.userId, t.updatedAt.desc())]
 )
 
+// The one rolling Hermes session each user talks to; Hermes holds the transcript.
+export const userSessions = pgTable("user_sessions", {
+  userId: uuid("user_id")
+    .primaryKey()
+    .references(() => users.id, { onDelete: "cascade" }),
+  hermesSessionId: text("hermes_session_id").notNull(),
+  projectId: uuid("project_id").references(() => projects.id, {
+    onDelete: "set null",
+  }),
+  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+})
+
 export const messages = pgTable(
   "messages",
   {

@@ -119,6 +119,51 @@ export async function ensureHermesSession(
   return row?.id ?? createHermesSession(chatId, title)
 }
 
+/** Scopes the agent's long-term memory to the person across sessions. */
+export function sessionKeyFor(username: string): string {
+  if (!username) throw new Error("Cannot build a Hermes session key without a user")
+  return `kryos:zola:dm:${username}`
+}
+
+async function newSessionId(username: string): Promise<string> {
+  const res = await fetch(`${process.env.HERMES_API_URL}/api/sessions`, {
+    method: "POST",
+    headers: hermesHeaders({ "X-Hermes-Session-Key": sessionKeyFor(username) }),
+    body: "{}",
+  })
+  if (!res.ok) {
+    const text = await res.text().catch(() => "")
+    throw new Error(`Hermes session create failed (${res.status}): ${text}`)
+  }
+  const id = ((await res.json()) as { session?: { id?: string } }).session?.id
+  if (!id) throw new Error("Hermes session create returned no id")
+  return id
+}
+
+type SessionUser = { id: string; username: string }
+
+/**
+ * The user's current rolling Hermes session id, created on first use. Two
+ * simultaneous first requests may each create a Hermes session; the insert
+ * keeps one row and both read the winner (the loser's session is orphaned).
+ */
+export async function currentSession(user: SessionUser): Promise<string> {
+  const read = async () => {
+    const [row] = await db
+      .select({ id: schema.userSessions.hermesSessionId })
+      .from(schema.userSessions)
+      .where(eq(schema.userSessions.userId, user.id))
+    return row?.id
+  }
+  const existing = await read()
+  if (existing) return existing
+  await db
+    .insert(schema.userSessions)
+    .values({ userId: user.id, hermesSessionId: await newSessionId(user.username) })
+    .onConflictDoNothing()
+  return (await read())!
+}
+
 /** Best-effort removal of a chat's Hermes session; failures are ignored. */
 export async function deleteHermesSession(sessionId: string): Promise<void> {
   await fetch(
