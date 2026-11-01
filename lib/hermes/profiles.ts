@@ -4,10 +4,10 @@
 // listProfiles() is the only shape that may reach the browser.
 //
 // HERMES_PROFILES = "name:label:key,name:label:key". The default profile is
-// always present (label "Gideon", key HERMES_API_KEY).
+// always present (label "Kavalan", key HERMES_API_KEY).
 
 export const DEFAULT_PROFILE = "default"
-const DEFAULT_LABEL = "Gideon"
+const DEFAULT_LABEL = "Kavalan"
 
 type Entry = { name: string; label: string; key: string }
 
@@ -27,7 +27,12 @@ function entries(): Entry[] {
 }
 
 // One-line job description shown on the Team screen, keyed by profile name.
-const ROLES: Record<string, string> = { [DEFAULT_PROFILE]: "Ops", nila: "Support" }
+const ROLES: Record<string, string> = {
+  [DEFAULT_PROFILE]: "Engineer",
+  nila: "Orchestrator",
+  vidya: "Researcher",
+  isai: "Media",
+}
 
 export type ProfileInfo = { name: string; label: string; role: string }
 

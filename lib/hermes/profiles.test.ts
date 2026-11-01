@@ -8,7 +8,7 @@ test("profiles", () => {
   process.env.HERMES_API_KEY = "dk"
   process.env.HERMES_PROFILES = "akka:Akka:sk-a, sage:Sage:sk-s ,bad,default:X:y"
   assert.deepEqual(listProfiles(), [
-    { name: "default", label: "Gideon", role: "Ops" },
+    { name: "default", label: "Kavalan", role: "Engineer" },
     { name: "akka", label: "Akka", role: "Agent" },
     { name: "sage", label: "Sage", role: "Agent" },
   ])
