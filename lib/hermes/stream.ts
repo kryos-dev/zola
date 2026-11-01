@@ -1,5 +1,6 @@
 import { createUIMessageStream, type UIMessage, type UIMessageStreamWriter } from "ai"
 import { toolTimer, turnData } from "@/lib/turn"
+import { parseJsonOr } from "./parts"
 
 // Maps the Hermes session chat SSE (`POST /api/sessions/{id}/chat/stream`) to
 // the AI SDK v5+ UI message stream protocol. Emits writer.write() chunks;
@@ -32,14 +33,6 @@ type HermesStreamOpts = {
   /** Id the assistant message is created under; the SDK invents one when omitted. */
   messageId?: string
   onFinish?: (payload: { message: UIMessage }) => void | Promise<void>
-}
-
-function parseJsonOr<T>(text: string, fallback: (raw: string) => T): T {
-  try {
-    return JSON.parse(text)
-  } catch {
-    return fallback(text)
-  }
 }
 
 const TEXT_ID = "hermes-text"

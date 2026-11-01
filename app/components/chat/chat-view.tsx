@@ -9,11 +9,8 @@ import { useChatDraft } from "@/app/hooks/use-chat-draft"
 import { toast } from "@/components/ui/toast"
 import { getOrCreateGuestUserId } from "@/lib/api"
 import { useChats } from "@/lib/chat-store/chats/provider"
-import {
-  fetchChatMessages,
-  textFromMessage,
-  type ZolaUIMessage,
-} from "@/lib/chat-store/messages/api"
+import { textFromMessage, type ZolaUIMessage } from "@/lib/chat-store/messages/api"
+import { fetchHistory } from "@/lib/history-client"
 import { useChatSession } from "@/lib/chat-store/session/provider"
 import { MESSAGE_MAX_LENGTH, SYSTEM_PROMPT_DEFAULT } from "@/lib/config"
 import type { FileUIPart } from "ai"
@@ -40,6 +37,8 @@ const transport = new DefaultChatTransport({
   // One rolling session per user: reattach has no chat id segment.
   prepareReconnectToStreamRequest: () => ({ api: `${API_ROUTE_CHAT}/stream` }),
 })
+// useChat instance id; the server resolves the user's session itself.
+const SESSION_KEY = "session"
 const RECONNECT_DELAYS = [1000, 2000, 4000, 8000, 16000]
 
 const isNetworkError = (error: Error) =>
@@ -48,19 +47,15 @@ const isNetworkError = (error: Error) =>
   (typeof navigator !== "undefined" && !navigator.onLine)
 
 type ChatViewProps = {
-  /** Chat id: from the URL, or generated client-side for a chat not created yet. */
-  chatKey: string
-  /** The chat already exists on the server. */
-  exists: boolean
   /** Rows loaded from the server; useChat starts from them and owns the list after. Undefined while loading. */
   history: ZolaUIMessage[] | undefined
   /** The server is still running a turn for this chat. */
   pending: boolean
 }
 
-export function ChatView({ chatKey, exists, history, pending }: ChatViewProps) {
+export function ChatView({ history, pending }: ChatViewProps) {
   const { chatId } = useChatSession()
-  const { createNewChat, getChatById, updateChatModel, bumpChat, refresh } = useChats()
+  const { getChatById, updateChatModel } = useChats()
   const { user } = useUser()
   const { preferences } = useUserPreferences()
   const { draftValue, clearDraft, setDraftValue } = useChatDraft(chatId)
@@ -84,7 +79,6 @@ export function ChatView({ chatKey, exists, history, pending }: ChatViewProps) {
   const [quotedText, setQuotedText] = useState<{ text: string; messageId: string }>()
   const [input, setInput] = useState(draftValue)
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const created = useRef(exists)
   const queryClient = useQueryClient()
 
   // Thinking effort persists across chats. It starts at the default on server
@@ -110,7 +104,7 @@ export function ChatView({ chatKey, exists, history, pending }: ChatViewProps) {
   }, [prompt])
 
   const { messages, status, stop: stopStream, sendMessage, setMessages, resumeStream } = useChat<ZolaUIMessage>({
-    id: chatKey,
+    id: SESSION_KEY,
     messages: history ?? [],
     resume: pending,
     transport,
@@ -120,8 +114,6 @@ export function ChatView({ chatKey, exists, history, pending }: ChatViewProps) {
     onFinish: () => {
       reconnectAttempts.current = 0
       reconnecting.current = false
-      // The title was set when the turn started; one refresh shows it.
-      void refresh()
     },
     onError: (error) => {
       if (isNetworkError(error)) {
@@ -170,12 +162,10 @@ export function ChatView({ chatKey, exists, history, pending }: ChatViewProps) {
     })
     if (replayed) return
     reconnecting.current = false
-    // Fetched explicitly: in a session that created its chat just now the
-    // history query is disabled, and invalidating a disabled query does
-    // nothing. The session still observes this key and remounts on the rows.
+    // The Chat wrapper observes this key and remounts on the rows.
     void queryClient.fetchQuery({
-      queryKey: ["chat-messages", chatKey],
-      queryFn: () => fetchChatMessages(chatKey),
+      queryKey: ["history"],
+      queryFn: () => fetchHistory(),
       staleTime: 0,
     })
   }
@@ -209,11 +199,8 @@ export function ChatView({ chatKey, exists, history, pending }: ChatViewProps) {
   // turns on one session wedge it.
   const stop = async () => {
     void stopStream()
-    if (!created.current) return
     await fetch("/api/chat/abort", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ chatId: chatKey }),
     }).catch(() => {})
   }
 
@@ -232,25 +219,8 @@ export function ChatView({ chatKey, exists, history, pending }: ChatViewProps) {
       const uid = await getOrCreateGuestUserId(user)
       if (!uid) return
 
-      // The chat is created under the id this view already has, then the URL
-      // is rewritten in place: same key, so nothing remounts mid-send.
-      if (!created.current) {
-        const chat = await createNewChat(
-          uid,
-          text,
-          selectedModel,
-          isAuthenticated,
-          systemPrompt,
-          undefined,
-          chatKey
-        )
-        if (!chat) return
-        created.current = true
-        window.history.replaceState(null, "", `/c/${chat.id}`)
-      }
-
       // On failure the files stay attached and the text stays in the composer.
-      const attachments = await handleFileUploads(uid, chatKey)
+      const attachments = await handleFileUploads(uid, SESSION_KEY)
       if (!attachments) return
 
       if (text === input) {
@@ -267,7 +237,6 @@ export function ChatView({ chatKey, exists, history, pending }: ChatViewProps) {
         { text, files: fileParts },
         {
           body: {
-            chatId: chatKey,
             userId: uid,
             model: selectedModel,
             isAuthenticated,
@@ -279,7 +248,6 @@ export function ChatView({ chatKey, exists, history, pending }: ChatViewProps) {
           },
         }
       )
-      if (messages.length > 0) bumpChat(chatKey)
     } catch {
       toast({ title: "Failed to send message", status: "error" })
     } finally {
