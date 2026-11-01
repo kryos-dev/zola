@@ -78,6 +78,21 @@ const textOf = (message) =>
   assert.equal(typeof turn.tools?.[term.toolCallId], "number", "expected a per-tool duration")
 }
 
+// --- Text before a tool call must not be duplicated by assistant.completed. ---
+{
+  const { message } = await run(
+    frames([
+      ["assistant.delta", { delta: "I checked the docs. " }],
+      ["tool.started", { tool_name: "terminal", args: { command: "cat docs" } }],
+      ["tool.completed", { tool_name: "terminal", preview: "done" }],
+      ["assistant.delta", { delta: "The answer is 42." }],
+      ["assistant.completed", { content: "I checked the docs. The answer is 42." }],
+      ["run.completed", {}],
+    ])
+  )
+  assert.equal(textOf(message), "I checked the docs. The answer is 42.")
+}
+
 // --- assistant.completed: appended when the streamed text is a prefix, a
 // separate part when it differs, and the only text when nothing streamed. ---
 {
@@ -94,6 +109,40 @@ const textOf = (message) =>
     frames([["assistant.delta", { delta: "MEDIA:/a.png" }], ["assistant.completed", { content: "![i](data:image/png;base64,AA)" }], ...done])
   )
   assert.ok(textOf(differs.message).endsWith("![i](data:image/png;base64,AA)"))
+}
+
+// --- A multi-round reply: the final event carries only the LAST segment, so a
+// comparison against the whole streamed text wrongly appends it again. ---
+{
+  const { message } = await run(
+    frames([
+      ["assistant.delta", { delta: "First I checked the files." }],
+      ["tool.started", { tool_name: "terminal", args: { command: "ls" } }],
+      ["tool.completed", { tool_name: "terminal", preview: "ok" }],
+      ["assistant.delta", { delta: "\n\nHere is the answer: 42." }],
+      ["assistant.completed", { content: "Here is the answer: 42." }],
+      ["run.completed", {}],
+    ])
+  )
+  const text = textOf(message)
+  assert.equal(
+    text.split("Here is the answer: 42.").length - 1,
+    1,
+    "the final segment appears once"
+  )
+}
+
+// --- A trimmed authoritative final must not duplicate streamed leading whitespace. ---
+{
+  const answer = "The answer was streamed once."
+  const { message } = await run(
+    frames([
+      ["assistant.delta", { delta: `\n\n${answer}` }],
+      ["assistant.completed", { content: answer }],
+      ["run.completed", {}],
+    ])
+  )
+  assert.equal(textOf(message), `\n\n${answer}`)
 }
 
 // --- Commentary is text only when it was not already streamed. ---

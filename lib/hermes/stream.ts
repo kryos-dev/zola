@@ -44,8 +44,11 @@ async function writeHermesSession(
 ): Promise<void> {
   const decoder = new TextDecoder()
   let textOpen = false
-  // Text streamed into the currently open part, compared with the final content.
-  let segment = ""
+  // All streamed assistant text across text parts, not just the currently open
+  // part: a response can emit prose, call a tool, then continue with prose.
+  // Hermes' assistant.completed contains the full final answer, so comparing
+  // only the final segment appended the whole answer a second time.
+  let streamedText = ""
   let finished = false
   let extraParts = 0
   const startedAt = Date.now()
@@ -73,7 +76,6 @@ async function writeHermesSession(
       writer.write({ type: "text-end", id: TEXT_ID })
       textOpen = false
     }
-    segment = ""
   }
   const writeReasoningDelta = (delta: string) => {
     if (!delta) return
@@ -87,22 +89,20 @@ async function writeHermesSession(
   }
   const writeTextDelta = (delta: string) => {
     if (!delta) return
-    // Leading whitespace is dropped from the stream (but kept in `segment` so
-    // the final content still matches): opening a text part for it would hide
-    // the loader while nothing visible is drawn.
-    if (!textOpen && !delta.trim()) {
-      segment += delta
-      return
-    }
+    streamedText += delta
+    // Leading whitespace is dropped from the stream (but kept in streamedText
+    // for comparing with assistant.completed): opening a text part for it would
+    // hide the loader while nothing visible is drawn.
+    if (!textOpen && !delta.trim()) return
     closeReasoningIfOpen()
     if (!textOpen) {
       writer.write({ type: "text-start", id: TEXT_ID })
       textOpen = true
     }
-    segment += delta
     writer.write({ type: "text-delta", id: TEXT_ID, delta })
   }
   const writeTextPart = (text: string) => {
+    streamedText += text
     const id = `hermes-text-extra-${extraParts++}`
     writer.write({ type: "text-start", id })
     writer.write({ type: "text-delta", id, delta: text })
@@ -213,9 +213,22 @@ async function writeHermesSession(
       }
       case "assistant.completed": {
         const content = str(data.content)
-        if (!content || content === segment) break
-        if (content.startsWith(segment)) {
-          writeTextDelta(content.slice(segment.length))
+        if (!content) break
+        // The authoritative final is the LAST segment of the reply, while the
+        // stream carries every segment. So it is already on screen when the
+        // streamed text ENDS with it -- comparing against the whole of it
+        // treated a multi-round reply's final segment as new text and appended
+        // the answer a second time. Only when the final actually continues the
+        // stream (a rewritten tail, resolved media, nothing streamed at all) is
+        // there anything left to write.
+        const streamed = streamedText.trimEnd()
+        const finalText = content.trimStart()
+        if (streamedText.trim() && streamedText.trim().endsWith(finalText.trim())) break
+        if (finalText.startsWith(streamed)) {
+          const rest = finalText.slice(streamed.length)
+          // The stream already ended in whitespace (a separator), so keeping
+          // the final's own leading whitespace would double the gap.
+          writeTextDelta(/\s$/.test(streamedText) ? rest.replace(/^\s+/, "") : rest)
         } else {
           closeTextIfOpen()
           writeTextPart(content)

@@ -9,8 +9,11 @@ import { useCallback, useState } from "react"
 export const useFileUpload = () => {
   const [files, setFiles] = useState<File[]>([])
 
-  const handleFileUploads = async (uid: string): Promise<Attachment[] | null> => {
-    if (files.length === 0) return []
+  const handleFileUploads = async (
+    uid: string,
+    filesToUpload: File[] = files
+  ): Promise<Attachment[] | null> => {
+    if (filesToUpload.length === 0) return []
 
     try {
       await checkFileUploadLimit(uid)
@@ -23,8 +26,8 @@ export const useFileUpload = () => {
     }
 
     try {
-      const processed = await processFiles(files, uid)
-      setFiles([])
+      const processed = await processFiles(filesToUpload, uid)
+      setFiles((current) => current.filter((file) => !filesToUpload.includes(file)))
       return processed
     } catch {
       toast({ title: "Failed to process files", status: "error" })

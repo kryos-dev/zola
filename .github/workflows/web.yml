@@ -1,3 +1,10 @@
+# Build the image, then roll it out to the VM.
+#
+# Tests and a production build run inside the Dockerfile's builder stage, so a
+# failed test means no image is pushed and the running container keeps serving.
+# The deploy job then hands the exact image this run built (sha-<short>, not
+# :latest) to a restricted key on the box, which pulls it, recreates only the
+# zola container and restores the previous image if the new one is not healthy.
 name: web
 
 on:
@@ -8,13 +15,17 @@ on:
 
 permissions:
   contents: read
-  packages: write
 
 jobs:
   image:
     runs-on: ubuntu-24.04-arm
+    permissions:
+      contents: read
+      packages: write
     steps:
       - uses: actions/checkout@v4
+      - id: sha
+        run: echo "short=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
@@ -29,6 +40,29 @@ jobs:
           push: true
           tags: |
             ghcr.io/kryos-dev/zola/web:latest
-            ghcr.io/kryos-dev/zola/web:${{ github.sha }}
+            ghcr.io/kryos-dev/zola/web:sha-${{ steps.sha.outputs.short }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+  deploy:
+    needs: image
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: ssh setup
+        env:
+          KEY: ${{ secrets.ZOLA_DEPLOY_KEY }}
+        run: |
+          set -euo pipefail
+          [ -n "$KEY" ] || { echo "ZOLA_DEPLOY_KEY is not set"; exit 1; }
+          mkdir -p ~/.ssh && chmod 700 ~/.ssh
+          printf '%s\n' "$KEY" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -t ed25519 130.210.37.45 >> ~/.ssh/known_hosts 2>/dev/null
+      - name: deploy the image this run built
+        run: |
+          set -euo pipefail
+          # The key is locked to /usr/local/bin/zola-deploy (ops/), which
+          # accepts this one argument and nothing else.
+          ssh -i ~/.ssh/id_ed25519 -o BatchMode=yes -o IdentitiesOnly=yes \
+            ubuntu@130.210.37.45 "sha-${GITHUB_SHA::7}"

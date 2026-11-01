@@ -11,8 +11,9 @@ import {
 } from "@/components/prompt-kit/prompt-input"
 import { Button } from "@/components/ui/button"
 import { ArrowUpIcon, StopIcon, WaveformIcon } from "@phosphor-icons/react"
+import { ListPlus } from "lucide-react"
 import { useRouter } from "next/navigation"
-import { useCallback, useEffect, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { PromptSystem } from "../suggestions/prompt-system"
 import { ButtonFileUpload } from "./button-file-upload"
 import { ButtonVoice } from "./button-voice"
@@ -21,6 +22,7 @@ import { ThinkingEffortSelect } from "./thinking-effort-select"
 import { ContextMeter } from "./context-meter"
 import { matchCommands, parseSlash, type SlashCommand } from "./slash-commands"
 import { SlashMenu } from "./slash-menu"
+import { chatSendIntent } from "@/lib/chat-send-intent"
 import type { LanguageModelUsage } from "ai"
 
 type ChatInputProps = {
@@ -72,29 +74,21 @@ export function ChatInput({
   // files are stored on disk and referenced by path.
   const fileAccept =
     "image/jpeg,image/png,image/gif,image/webp,image/heic,image/heif"
-  const isOnlyWhitespace = (text: string) => !/[^\s]/.test(text)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   const handleSend = useCallback(async () => {
-    if (isSubmitting) {
+    const intent = chatSendIntent(status ?? "ready", value, files.length)
+    if (isSubmitting || intent === "ignore") return
+
+    // Active turns queue a follow-up instead of being interrupted. An empty
+    // composer still uses the same control to stop the current response.
+    if (intent === "stop") {
+      await stop()
       return
     }
 
-    // Mid-stream with something typed means "I have changed my mind, answer
-    // THIS instead": stop the running turn and send it. Returning here dropped
-    // the typed message silently -- no request was ever made, which read as the
-    // assistant ignoring the follow-up.
-    //
-    // AWAITED. Hermes keys a session on the chat id, so firing the new turn
-    // while the old one was still being torn down put two runs on one session:
-    // the chat then answered neither and stayed stuck until a reload.
-    if (status === "streaming" || status === "submitted") {
-      await stop()
-      if (isOnlyWhitespace(value)) return
-    }
-
     onSend()
-  }, [isSubmitting, onSend, status, stop, value])
+  }, [files, isSubmitting, onSend, status, stop, value])
 
   // Slash commands. `parseSlash` returns null for anything that is not a
   // command being typed on the first line, so an ordinary message containing a
@@ -103,7 +97,11 @@ export function ChatInput({
   const [slashIndex, setSlashIndex] = useState(0)
   const [slashDismissed, setSlashDismissed] = useState(false)
   const slash = parseSlash(value)
-  const slashCommands = slash ? matchCommands(slash.typed) : []
+  const slashTyped = slash?.typed
+  const slashCommands = useMemo(
+    () => (slashTyped === undefined ? [] : matchCommands(slashTyped)),
+    [slashTyped]
+  )
   const slashOpen = !slashDismissed && slashCommands.length > 0
 
   // Escape dismisses the menu, and typing a fresh `/` brings it back.
@@ -172,7 +170,7 @@ export function ChatInput({
       }
 
       if (e.key === "Enter" && !e.shiftKey) {
-        if (isOnlyWhitespace(value)) {
+        if (chatSendIntent("ready", value, files.length) === "ignore") {
           e.preventDefault()
           return
         }
@@ -185,8 +183,8 @@ export function ChatInput({
     [
       isSubmitting,
       handleSend,
-      status,
       value,
+      files,
       slashOpen,
       slashCommands,
       slashIndex,
@@ -248,6 +246,8 @@ export function ChatInput({
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [quotedText, onValueChange])
+
+  const sendIntent = chatSendIntent(status ?? "ready", value, files.length)
 
   return (
     <div className="relative flex w-full flex-col gap-4">
@@ -324,22 +324,31 @@ export function ChatInput({
               disabled={isSubmitting}
             />
             <PromptInputAction
-              tooltip={status === "streaming" ? "Stop" : "Send"}
+              tooltip={
+                sendIntent === "queue"
+                  ? "Queue follow-up"
+                  : sendIntent === "stop"
+                    ? "Stop"
+                    : "Send"
+              }
             >
               <Button
                 size="sm"
                 className="size-8 rounded-full transition-all duration-300 ease-out"
-                // While streaming this button is Stop, and stopping does not
-                // need anything typed: gating it on `value` left the Stop icon
-                // permanently disabled, so the turn could not be interrupted.
-                disabled={
-                  isSubmitting || (status !== "streaming" && (!value || isOnlyWhitespace(value)))
-                }
+                disabled={isSubmitting || sendIntent === "ignore"}
                 type="button"
                 onClick={() => void handleSend()}
-                aria-label={status === "streaming" ? "Stop" : "Send message"}
+                aria-label={
+                  sendIntent === "queue"
+                    ? "Queue follow-up message"
+                    : sendIntent === "stop"
+                      ? "Stop response"
+                      : "Send message"
+                }
               >
-                {status === "streaming" ? (
+                {sendIntent === "queue" ? (
+                  <ListPlus className="size-4" />
+                ) : sendIntent === "stop" ? (
                   <StopIcon className="size-4" />
                 ) : (
                   <ArrowUpIcon className="size-4" />

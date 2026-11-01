@@ -20,7 +20,9 @@ import {
   textFromMessage,
 } from "@/lib/hermes/types"
 import { cn } from "@/lib/utils"
+import { splitMediaSegments } from "@/lib/media-tags"
 import { Check, Copy } from "@phosphor-icons/react"
+import { MediaBlock } from "./media-block"
 import type { UIMessage } from "ai"
 import Image from "next/image"
 import React from "react"
@@ -104,24 +106,31 @@ export const MessageUser = React.memo(function MessageUser({
         // won, and a pasted URL ran out of the bubble (390px).
         className="bg-accent prose dark:prose-invert text-base leading-7 relative max-w-3/4 rounded-3xl px-5 py-2.5 [overflow-wrap:anywhere]"
       >
-        <MessageResponse
-          components={{
-            code: ({ children }) => <React.Fragment>{children}</React.Fragment>,
-            pre: ({ children }) => <React.Fragment>{children}</React.Fragment>,
-            h1: ({ children }) => <p>{children}</p>,
-            h2: ({ children }) => <p>{children}</p>,
-            h3: ({ children }) => <p>{children}</p>,
-            h4: ({ children }) => <p>{children}</p>,
-            h5: ({ children }) => <p>{children}</p>,
-            h6: ({ children }) => <p>{children}</p>,
-            p: ({ children }) => <p>{children}</p>,
-            li: ({ children }) => <p>- {children}</p>,
-            ul: ({ children }) => <React.Fragment>{children}</React.Fragment>,
-            ol: ({ children }) => <React.Fragment>{children}</React.Fragment>,
-          }}
-        >
-          {children}
-        </MessageResponse>
+        {splitMediaSegments(children).map((segment, index) =>
+          segment.kind === "media" ? (
+            <MediaBlock key={`media-${index}`} path={segment.path} />
+          ) : segment.text.trim() ? (
+            <MessageResponse
+              key={`text-${index}`}
+              components={{
+                code: ({ children }) => <React.Fragment>{children}</React.Fragment>,
+                pre: ({ children }) => <React.Fragment>{children}</React.Fragment>,
+                h1: ({ children }) => <p>{children}</p>,
+                h2: ({ children }) => <p>{children}</p>,
+                h3: ({ children }) => <p>{children}</p>,
+                h4: ({ children }) => <p>{children}</p>,
+                h5: ({ children }) => <p>{children}</p>,
+                h6: ({ children }) => <p>{children}</p>,
+                p: ({ children }) => <p>{children}</p>,
+                li: ({ children }) => <p>- {children}</p>,
+                ul: ({ children }) => <React.Fragment>{children}</React.Fragment>,
+                ol: ({ children }) => <React.Fragment>{children}</React.Fragment>,
+              }}
+            >
+              {segment.text}
+            </MessageResponse>
+          ) : null
+        )}
       </MessageContent>
       {/* Visible on touch, hover-revealed from md up: a phone never fires
           hover, so copy was unreachable here. See #31. */}

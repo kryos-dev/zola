@@ -20,6 +20,7 @@ import {
   THINKING_EFFORT_STORAGE_KEY,
 } from "@/lib/thinking-effort"
 import { turnFromParts } from "@/lib/turn"
+import { enqueueTurn, removeTurn, type QueuedTurn } from "@/lib/queued-turns"
 import { useUserPreferences } from "@/lib/user-preference-store/provider"
 import { useUser } from "@/lib/user-store/provider"
 import { cn } from "@/lib/utils"
@@ -39,6 +40,17 @@ const transport = new DefaultChatTransport({
 // useChat instance id; the server resolves the user's session itself.
 const SESSION_KEY = "session"
 const RECONNECT_DELAYS = [1000, 2000, 4000, 8000, 16000]
+
+type QueuedTurnRequest = QueuedTurn & {
+  text: string
+  files: File[]
+  model: string
+  systemPrompt: string
+  reasoningEffort: string
+  canvasId?: string
+  canvasTitle?: string
+  state: "queued" | "sending" | "failed"
+}
 
 const isNetworkError = (error: Error) =>
   error instanceof TypeError ||
@@ -60,7 +72,7 @@ export function ChatView({ history, pending, nextCursor, voice, onVoiceChange }:
   const { user } = useUser()
   const { preferences } = useUserPreferences()
   const { draftValue, clearDraft, setDraftValue } = useChatDraft()
-  const { files, handleFileUploads, handleFileUpload, handleFileRemove } = useFileUpload()
+  const { files, setFiles, handleFileUploads, handleFileUpload, handleFileRemove } = useFileUpload()
   const { selectedModel, handleModelChange } = useModel({ user })
   const isAuthenticated = !!user?.id
   const systemPrompt = user?.system_prompt || SYSTEM_PROMPT_DEFAULT
@@ -83,6 +95,13 @@ export function ChatView({ history, pending, nextCursor, voice, onVoiceChange }:
   const [quotedText, setQuotedText] = useState<{ text: string; messageId: string }>()
   const [input, setInput] = useState(draftValue)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  const [queuedTurns, setQueuedTurns] = useState<QueuedTurnRequest[]>([])
+  const queuedTurnsRef = useRef<QueuedTurnRequest[]>([])
+  const [queueDrainRequested, setQueueDrainRequested] = useState(false)
+  const replaceQueuedTurns = (next: QueuedTurnRequest[]) => {
+    queuedTurnsRef.current = next
+    setQueuedTurns(next)
+  }
   const queryClient = useQueryClient()
 
   // Thinking effort persists across chats. It starts at the default on server
@@ -118,6 +137,7 @@ export function ChatView({ history, pending, nextCursor, voice, onVoiceChange }:
     onFinish: () => {
       reconnectAttempts.current = 0
       reconnecting.current = false
+      if (queuedTurnsRef.current.length > 0) setQueueDrainRequested(true)
     },
     onError: (error) => {
       if (isNetworkError(error)) {
@@ -135,6 +155,7 @@ export function ChatView({ history, pending, nextCursor, voice, onVoiceChange }:
         }
         return scheduleReconnect()
       }
+      if (queuedTurnsRef.current.length > 0) setQueueDrainRequested(true)
       const message = error.message
       toast({
         title:
@@ -177,6 +198,7 @@ export function ChatView({ history, pending, nextCursor, voice, onVoiceChange }:
     const attempt = reconnectAttempts.current
     if (attempt >= RECONNECT_DELAYS.length) {
       reconnecting.current = false
+      if (queuedTurnsRef.current.length > 0) setQueueDrainRequested(true)
       toast({ title: "Connection lost. Please try again.", status: "error" })
       return
     }
@@ -208,7 +230,90 @@ export function ChatView({ history, pending, nextCursor, voice, onVoiceChange }:
     }).catch(() => {})
   }
 
-  // `text` overrides the composer: used by suggestions and the canvas prompt.
+  const updateQueuedState = (id: string, state: QueuedTurnRequest["state"]) => {
+    replaceQueuedTurns(
+      queuedTurnsRef.current.map((turn) =>
+        turn.id === id ? { ...turn, state } : turn
+      )
+    )
+  }
+
+  const sendTurn = async (
+    turn: QueuedTurnRequest,
+    fromQueue: boolean
+  ): Promise<boolean> => {
+    if (isSubmitting) return false
+    if (turn.text.length > MESSAGE_MAX_LENGTH) {
+      toast({
+        title: `The message you submitted was too long, please submit something shorter. (Max ${MESSAGE_MAX_LENGTH} characters)`,
+        status: "error",
+      })
+      if (fromQueue) updateQueuedState(turn.id, "failed")
+      return false
+    }
+
+    setIsSubmitting(true)
+    try {
+      const uid = await getOrCreateGuestUserId(user)
+      if (!uid) {
+        if (fromQueue) updateQueuedState(turn.id, "failed")
+        return false
+      }
+
+      // Queued uploads are deferred until their turn reaches the front, so a
+      // cancelled queued message does not leave orphaned blobs on disk.
+      const attachments = await handleFileUploads(uid, turn.files)
+      if (!attachments) {
+        if (fromQueue) updateQueuedState(turn.id, "failed")
+        return false
+      }
+
+      if (!fromQueue && turn.text === input) {
+        setInput("")
+        clearDraft()
+      }
+      const fileParts: FileUIPart[] = attachments.map((attachment) => ({
+        type: "file",
+        mediaType: attachment.contentType,
+        filename: attachment.name,
+        url: attachment.url,
+      }))
+      void sendMessage(
+        { text: turn.text, files: fileParts },
+        {
+          body: {
+            userId: uid,
+            model: turn.model,
+            isAuthenticated,
+            systemPrompt: turn.systemPrompt,
+            reasoningEffort: turn.reasoningEffort,
+            ...(turn.canvasId
+              ? { canvasId: turn.canvasId, canvasTitle: turn.canvasTitle }
+              : {}),
+          },
+        }
+      )
+      if (fromQueue) {
+        replaceQueuedTurns(removeTurn(queuedTurnsRef.current, turn.id))
+      }
+      return true
+    } catch {
+      if (fromQueue) updateQueuedState(turn.id, "failed")
+      toast({ title: "Failed to send message", status: "error" })
+      return false
+    } finally {
+      setIsSubmitting(false)
+    }
+  }
+
+  const updateQueuedStateRef = useRef(updateQueuedState)
+  updateQueuedStateRef.current = updateQueuedState
+  const sendTurnRef = useRef(sendTurn)
+  sendTurnRef.current = sendTurn
+
+  // The API submit path is deliberately not used for a queued turn until its
+  // parent response finishes. That way each useChat stream owns exactly one
+  // user/assistant pair; no competing stream can replace it with an empty row.
   const submit = async (text: string = input) => {
     if (isSubmitting) return
     if (text.length > MESSAGE_MAX_LENGTH) {
@@ -218,45 +323,66 @@ export function ChatView({ history, pending, nextCursor, voice, onVoiceChange }:
       })
       return
     }
-    setIsSubmitting(true)
-    try {
-      const uid = await getOrCreateGuestUserId(user)
-      if (!uid) return
+    if (!text.trim() && files.length === 0) return
 
-      // On failure the files stay attached and the text stays in the composer.
-      const attachments = await handleFileUploads(uid)
-      if (!attachments) return
+    const turn: QueuedTurnRequest = {
+      id: crypto.randomUUID(),
+      text,
+      files: [...files],
+      model: selectedModel,
+      systemPrompt,
+      reasoningEffort,
+      ...(activeCanvas
+        ? { canvasId: activeCanvas.id, canvasTitle: activeCanvas.title }
+        : {}),
+      state: "queued",
+    }
+    const mustQueue =
+      status === "streaming" ||
+      status === "submitted" ||
+      queuedTurnsRef.current.length > 0
 
+    if (mustQueue) {
+      replaceQueuedTurns(enqueueTurn(queuedTurnsRef.current, turn))
       if (text === input) {
         setInput("")
         clearDraft()
       }
-      const fileParts: FileUIPart[] = attachments.map((a) => ({
-        type: "file",
-        mediaType: a.contentType,
-        filename: a.name,
-        url: a.url,
-      }))
-      void sendMessage(
-        { text, files: fileParts },
-        {
-          body: {
-            userId: uid,
-            model: selectedModel,
-            isAuthenticated,
-            systemPrompt,
-            reasoningEffort,
-            ...(activeCanvas
-              ? { canvasId: activeCanvas.id, canvasTitle: activeCanvas.title }
-              : {}),
-          },
-        }
-      )
-    } catch {
-      toast({ title: "Failed to send message", status: "error" })
-    } finally {
-      setIsSubmitting(false)
+      setFiles([])
+      return
     }
+
+    await sendTurn(turn, false)
+  }
+
+  // Drain strictly FIFO after the active stream settles. While a queued turn is
+  // uploading it remains visibly marked as "Sending"; failures remain in the
+  // queue with a Retry action instead of disappearing as an empty response.
+  useEffect(() => {
+    if (!queueDrainRequested || isSubmitting) return
+    if (status !== "ready" && status !== "error") return
+    const next = queuedTurnsRef.current[0]
+    if (!next) {
+      setQueueDrainRequested(false)
+      return
+    }
+    setQueueDrainRequested(false)
+    updateQueuedStateRef.current(next.id, "sending")
+    void sendTurnRef.current({ ...next, state: "sending" }, true)
+  }, [isSubmitting, queueDrainRequested, status])
+
+  const removeQueuedTurn = (id: string) => {
+    const next = removeTurn(queuedTurnsRef.current, id)
+    replaceQueuedTurns(next)
+    if (next.length > 0 && (status === "ready" || status === "error")) {
+      setQueueDrainRequested(true)
+    }
+  }
+
+  const retryQueuedTurn = (id: string) => {
+    if (queuedTurnsRef.current[0]?.id !== id) return
+    updateQueuedState(id, "queued")
+    setQueueDrainRequested(true)
   }
 
   const submitRef = useRef(submit)
@@ -295,6 +421,13 @@ export function ChatView({ history, pending, nextCursor, voice, onVoiceChange }:
   }
 
   const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant")
+  const activeParent = [...messages].reverse().find((m) => m.role === "user")
+  const queuedMessageViews = queuedTurns.map((turn) => ({
+    id: turn.id,
+    text: turn.text,
+    filenames: turn.files.map((file) => file.name),
+    state: turn.state,
+  }))
   const showOnboarding = messages.length === 0 && older.length === 0
 
   return (
@@ -334,6 +467,10 @@ export function ChatView({ history, pending, nextCursor, voice, onVoiceChange }:
             // chat is created and files are uploaded.
             status={isSubmitting && status === "ready" ? "submitted" : status}
             onQuote={(text, messageId) => setQuotedText({ text, messageId })}
+            queuedMessages={queuedMessageViews}
+            queuedAfter={activeParent ? textFromMessage(activeParent) : undefined}
+            onRemoveQueued={removeQueuedTurn}
+            onRetryQueued={retryQueuedTurn}
           />
         )}
       </AnimatePresence>

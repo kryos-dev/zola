@@ -4,18 +4,30 @@ import {
   ConversationScrollButton,
 } from "@/components/ai-elements/conversation"
 import type { ZolaUIMessage } from "@/lib/hermes/types"
+import { X, RotateCcw } from "lucide-react"
 import { Fragment, useCallback, useEffect, useLayoutEffect, useRef } from "react"
 import { Shimmer } from "@/components/ai-elements/shimmer"
 import { MessageAssistant } from "./message-assistant"
 import { MessageUser } from "./message-user"
 import { isVisiblePart } from "./utils"
 
+type QueuedMessageView = {
+  id: string
+  text: string
+  filenames: string[]
+  state: "queued" | "sending" | "failed"
+}
+
 type ConversationProps = {
   messages: ZolaUIMessage[]
   status?: "streaming" | "ready" | "submitted" | "error"
   onQuote?: (text: string, messageId: string) => void
-  // Header-height fade over the top of the list on phones. Off where the page
-  // already pads for the app header, else it blanks the first message.
+  queuedMessages?: QueuedMessageView[]
+  queuedAfter?: string
+  onRemoveQueued?: (id: string) => void
+  onRetryQueued?: (id: string) => void
+  // Solid header cover over the list on phones. Off where the page already
+  // pads for the app header, else it blanks the first message.
   topMask?: boolean
   /** Scroll-back: older rows exist; the top sentinel asks for them. */
   hasOlder?: boolean
@@ -37,6 +49,10 @@ export function Conversation({
   messages,
   status = "ready",
   onQuote,
+  queuedMessages = [],
+  queuedAfter,
+  onRemoveQueued,
+  onRetryQueued,
   topMask = true,
   hasOlder = false,
   loadingOlder = false,
@@ -99,9 +115,12 @@ export function Conversation({
   return (
     <div className="relative flex h-full w-full flex-col items-center overflow-x-hidden overflow-y-auto">
       {topMask ? (
-        <div className="pointer-events-none absolute top-0 right-0 left-0 z-10 mx-auto flex w-full flex-col justify-center">
-          <div className="h-app-header bg-background flex w-full lg:hidden lg:h-0" />
-          <div className="h-app-header bg-background flex w-full mask-b-from-4% mask-b-to-100% lg:hidden" />
+        // Cover content as it scrolls beneath the transparent mobile header.
+        // A second, fading header layer left prose half-visible behind the bar:
+        // letters became gray and looked clipped mid-message. One solid layer
+        // keeps the controls readable and makes covered text disappear cleanly.
+        <div className="pointer-events-none absolute top-0 right-0 left-0 z-10 mx-auto flex w-full flex-col justify-start">
+          <div className="h-app-header bg-background w-full lg:hidden" />
         </div>
       ) : null}
       <ConversationRoot className="relative w-full">
@@ -175,6 +194,70 @@ export function Conversation({
                   <Shimmer as="span">Thinking…</Shimmer>
                 </div>
               </div>
+            )}
+            {queuedMessages.length > 0 && (
+              <section
+                aria-label="Queued follow-up messages"
+                className="border-primary/40 bg-primary/5 mx-auto w-full max-w-3xl rounded-xl border border-dashed p-3 sm:px-5"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <p className="text-primary text-sm font-medium">
+                    Next in this chat · {queuedMessages.length} queued
+                  </p>
+                  <span className="text-muted-foreground text-xs">
+                    Sends after the current reply
+                  </span>
+                </div>
+                {queuedAfter ? (
+                  <p className="text-muted-foreground mt-1 truncate text-xs">
+                    Waiting on: {queuedAfter}
+                  </p>
+                ) : null}
+                <ol className="mt-3 space-y-2 border-l-2 border-dashed border-primary/30 pl-3">
+                  {queuedMessages.map((item, index) => (
+                    <li
+                      key={item.id}
+                      className="bg-background/80 flex min-w-0 items-start justify-between gap-3 rounded-lg border px-3 py-2"
+                    >
+                      <div className="min-w-0 flex-1">
+                        <p className="text-muted-foreground text-xs font-medium">
+                          {item.state === "sending"
+                            ? "Sending next…"
+                            : item.state === "failed"
+                              ? "Couldn’t send · queued"
+                              : `Queued ${index + 1}`}
+                        </p>
+                        {item.text.trim() ? (
+                          <p className="mt-1 whitespace-pre-wrap text-sm">{item.text}</p>
+                        ) : null}
+                        {item.filenames.length > 0 ? (
+                          <p className="text-muted-foreground mt-1 truncate text-xs">
+                            Attachment{item.filenames.length === 1 ? "" : "s"}: {item.filenames.join(", ")}
+                          </p>
+                        ) : null}
+                        {item.state === "failed" ? (
+                          <button
+                            type="button"
+                            className="text-primary mt-1 inline-flex items-center gap-1 text-xs hover:underline"
+                            onClick={() => onRetryQueued?.(item.id)}
+                          >
+                            <RotateCcw className="size-3" /> Retry
+                          </button>
+                        ) : null}
+                      </div>
+                      <button
+                        type="button"
+                        aria-label={`Remove queued message ${index + 1}`}
+                        disabled={item.state === "sending"}
+                        className="text-muted-foreground hover:text-foreground disabled:opacity-40"
+                        onClick={() => onRemoveQueued?.(item.id)}
+                      >
+                        <X className="size-4" />
+                      </button>
+                    </li>
+                  ))}
+                </ol>
+              </section>
             )}
           </div>
         </ConversationContent>
