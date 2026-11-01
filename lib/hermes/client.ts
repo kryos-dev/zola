@@ -89,7 +89,7 @@ export function sessionKeyFor(username: string, profile: string): string {
   return `kryos:zola:${profile}:dm:${username}`
 }
 
-async function newSessionId(username: string, profile: string): Promise<string> {
+export async function newSessionId(username: string, profile: string): Promise<string> {
   const res = await fetch(`${profileBase(profile).baseUrl}/api/sessions`, {
     method: "POST",
     headers: hermesHeaders(profile, {

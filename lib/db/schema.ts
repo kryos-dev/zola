@@ -104,6 +104,7 @@ export const userTasks = pgTable(
     runId: text("run_id").notNull().unique(),
     title: text("title").notNull(),
     status: text("status").notNull().default("running"),
+    sessionId: text("session_id"),
     createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
   },
   (t) => [index("user_tasks_user_created_idx").on(t.userId, t.createdAt)]

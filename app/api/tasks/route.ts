@@ -1,5 +1,5 @@
 import { getCurrentUser } from "@/lib/auth"
-import { currentSession, activeProfile } from "@/lib/hermes/client"
+import { newSessionId, activeProfile } from "@/lib/hermes/client"
 import { isProfile } from "@/lib/hermes/profiles"
 import { createRun, getRun } from "@/lib/hermes/runs"
 import { db, schema } from "@/lib/db"
@@ -18,17 +18,18 @@ export async function POST(request: Request) {
   const profile = body.profile && isProfile(body.profile) ? body.profile : await activeProfile(user.id)
 
   try {
+    const sessionId = await newSessionId(user.username, profile)
     const runId = await createRun({
       profile,
       username: user.username,
-      sessionId: await currentSession(user, profile),
+      sessionId,
       text,
       idempotencyKey: request.headers.get("Idempotency-Key") || crypto.randomUUID(),
     })
     const title = titleFrom(text)
     await db
       .insert(schema.userTasks)
-      .values({ userId: user.id, profile, runId, title })
+      .values({ userId: user.id, profile, runId, title, sessionId })
       .onConflictDoNothing()
     return NextResponse.json({ runId, profile, title }, { status: 201 })
   } catch (err) {
