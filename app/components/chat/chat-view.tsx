@@ -35,7 +35,11 @@ import { useEffect, useRef, useState } from "react"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useQueryClient } from "@tanstack/react-query"
 
-const transport = new DefaultChatTransport({ api: API_ROUTE_CHAT })
+const transport = new DefaultChatTransport({
+  api: API_ROUTE_CHAT,
+  // One rolling session per user: reattach has no chat id segment.
+  prepareReconnectToStreamRequest: () => ({ api: `${API_ROUTE_CHAT}/stream` }),
+})
 const RECONNECT_DELAYS = [1000, 2000, 4000, 8000, 16000]
 
 const isNetworkError = (error: Error) =>

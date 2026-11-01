@@ -118,6 +118,12 @@ export function abortRun(chatId: string): boolean {
   return true
 }
 
+/** Re-key a running turn when its Hermes session was replaced mid-request. */
+export function moveRun(from: string, to: string, run: Run): void {
+  if (runs.get(from) === run) runs.delete(from)
+  runs.set(to, run)
+}
+
 /** Stop tracking a turn, but only if `run` is still the current one. */
 export function endRun(chatId: string, run: Run): void {
   if (runs.get(chatId) === run) runs.delete(chatId)

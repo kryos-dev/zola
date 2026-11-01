@@ -82,43 +82,6 @@ function hermesHeaders(extra?: Record<string, string>): Record<string, string> {
   }
 }
 
-async function createHermesSession(
-  chatId: string,
-  title?: string
-): Promise<string> {
-  const res = await fetch(`${process.env.HERMES_API_URL}/api/sessions`, {
-    method: "POST",
-    headers: hermesHeaders(),
-    body: JSON.stringify(title ? { title } : {}),
-  })
-  if (!res.ok) {
-    const text = await res.text().catch(() => "")
-    throw new Error(`Hermes session create failed (${res.status}): ${text}`)
-  }
-  const id = ((await res.json()) as { session?: { id?: string } }).session?.id
-  if (!id) throw new Error("Hermes session create returned no id")
-  await db
-    .update(schema.chats)
-    .set({ hermesSessionId: id })
-    .where(eq(schema.chats.id, chatId))
-  return id
-}
-
-/**
- * The Hermes session that holds this chat's conversation, created on first
- * use and stored on the chat row.
- */
-export async function ensureHermesSession(
-  chatId: string,
-  title?: string
-): Promise<string> {
-  const [row] = await db
-    .select({ id: schema.chats.hermesSessionId })
-    .from(schema.chats)
-    .where(eq(schema.chats.id, chatId))
-  return row?.id ?? createHermesSession(chatId, title)
-}
-
 /** Scopes the agent's long-term memory to the person across sessions. */
 export function sessionKeyFor(username: string): string {
   if (!username) throw new Error("Cannot build a Hermes session key without a user")
@@ -164,6 +127,19 @@ export async function currentSession(user: SessionUser): Promise<string> {
   return (await read())!
 }
 
+/** Points the user at a fresh Hermes session and returns its id. */
+export async function replaceSession(user: SessionUser): Promise<string> {
+  const id = await newSessionId(user.username)
+  await db
+    .insert(schema.userSessions)
+    .values({ userId: user.id, hermesSessionId: id })
+    .onConflictDoUpdate({
+      target: schema.userSessions.userId,
+      set: { hermesSessionId: id, updatedAt: new Date() },
+    })
+  return id
+}
+
 /** Best-effort removal of a chat's Hermes session; failures are ignored. */
 export async function deleteHermesSession(sessionId: string): Promise<void> {
   await fetch(
@@ -177,7 +153,7 @@ type HermesRequestArgs = {
   message: UIMessage
   /** Zola model id; "hermes-agent" or empty means the agent's own default. */
   model?: string
-  chatId: string
+  user: SessionUser
   sessionId: string
   systemPrompt?: string
   /** none | low | medium | high | max, see lib/thinking-effort.ts */
@@ -186,20 +162,26 @@ type HermesRequestArgs = {
 }
 
 // POSTs the new turn to the session's `/chat/stream` and returns the raw
-// Response for hermesSessionStreamToUIMessageStream. The session keeps the
-// conversation (attachments included) and compacts it server-side, so only the
-// newest message travels; the session key (the chat id) scopes the agent's
-// memory. A session that no longer exists on the Hermes side (404) is replaced
-// by a new one, stored on the chat, and the turn is retried once.
+// Response for hermesSessionStreamToUIMessageStream plus the session id it
+// actually ran on. The session keeps the conversation (attachments included)
+// and compacts it server-side, so only the newest message travels; the session
+// key (per user) scopes the agent's memory across sessions. A session that no
+// longer exists on the Hermes side (404) is replaced by a new one, the user's
+// pointer is updated, and the turn is retried once (`replaced` is then true:
+// the earlier transcript is gone).
 export async function hermesRequest({
   message,
   model,
-  chatId,
+  user,
   sessionId,
   systemPrompt,
   reasoningEffort,
   signal,
-}: HermesRequestArgs): Promise<Response> {
+}: HermesRequestArgs): Promise<{
+  res: Response
+  sessionId: string
+  replaced: boolean
+}> {
   const picked = decodeModelId(model)
   const body = JSON.stringify({
     message: await userTurnInput(message),
@@ -215,19 +197,24 @@ export async function hermesRequest({
       {
         method: "POST",
         signal,
-        headers: hermesHeaders({ "X-Hermes-Session-Key": chatId }),
+        headers: hermesHeaders({
+          "X-Hermes-Session-Key": sessionKeyFor(user.username),
+        }),
         body,
       }
     )
 
   let res = await post(sessionId)
+  let replaced = false
   if (res.status === 404) {
-    res = await post(await createHermesSession(chatId))
+    sessionId = await replaceSession(user)
+    replaced = true
+    res = await post(sessionId)
   }
 
   if (!res.ok || !res.body) {
     const text = await res.text().catch(() => "")
     throw new Error(`Hermes agent request failed (${res.status}): ${text}`)
   }
-  return res
+  return { res, sessionId, replaced }
 }
