@@ -26,6 +26,8 @@ type Recognition = {
   lang: string
   interimResults: boolean
   continuous: boolean
+  onsoundstart: (() => void) | null
+  onspeechstart: (() => void) | null
   onresult: ((e: { results: ArrayLike<ArrayLike<{ transcript: string }> & { isFinal: boolean }> }) => void) | null
   onerror: ((e: { error: string }) => void) | null
   onend: (() => void) | null
@@ -199,7 +201,15 @@ export function VoiceMode({ messages, status, autoStart, onSend, onAbort, onClos
       else teardown()
     }
 
-    void (async () => {
+    // Recorder path: opens the mic itself, meters its level and stops on silence.
+    const record = async () => {
+      cancelAnimationFrame(raf)
+      const format = recordingFormat()
+      if (!format) {
+        toast({ title: "Voice input is not supported in this browser", status: "error" })
+        teardown()
+        return setPhase("idle")
+      }
       try {
         stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       } catch (err) {
@@ -210,7 +220,6 @@ export function VoiceMode({ messages, status, autoStart, onSend, onAbort, onClos
       setPhase("listening")
       setCaption("")
 
-      // Mic level for the orb, and silence detection for the recorder fallback.
       ctx = new AudioContext()
       const analyser = ctx.createAnalyser()
       analyser.fftSize = 512
@@ -239,67 +248,81 @@ export function VoiceMode({ messages, status, autoStart, onSend, onAbort, onClos
         }
         raf = requestAnimationFrame(tick)
       }
-      raf = requestAnimationFrame(tick)
 
-      const record = () => {
-        const format = recordingFormat()
-        if (!format) {
-          toast({ title: "Voice input is not supported in this browser", status: "error" })
-          teardown()
-          return setPhase("idle")
-        }
-        const chunks: Blob[] = []
-        recorder = new MediaRecorder(stream!, { mimeType: format.mimeType })
-        recorder.ondataavailable = (e) => e.data.size && chunks.push(e.data)
-        recorder.onstop = async () => {
-          const wasHeard = spoke
-          teardown()
-          if (g !== gen.current || !wasHeard) return setPhase("idle")
-          setPhase("thinking")
-          setCaption("...")
-          try {
-            const form = new FormData()
-            form.append("file", new Blob(chunks, { type: format.mimeType }), `voice.${format.ext}`)
-            const res = await fetch("/api/voice/transcribe", { method: "POST", body: form })
-            const body = (await res.json().catch(() => ({}))) as { text?: string; error?: string }
-            if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`)
-            if (g === gen.current) submit(body.text ?? "")
-          } catch (err) {
-            toast({ title: `Transcription failed: ${(err as Error).message}`, status: "error" })
-            setPhase("idle")
-          }
-        }
-        recorder.start()
-      }
-
-      if (!SR) return record()
-      rec = new SR()
-      rec.lang = langRef.current
-      rec.interimResults = true
-      rec.continuous = false
-      rec.onresult = (e) => {
-        heard = Array.from(e.results)
-          .map((r) => r[0].transcript)
-          .join(" ")
-        setCaption(heard)
-      }
-      rec.onerror = (e) => {
-        // Some phones will not share the microphone with the recognizer; the
-        // recorder path then does the job.
-        if (e.error === "audio-capture" || e.error === "service-not-allowed") {
-          rec!.onend = null
-          rec = undefined
-          record()
-        }
-      }
-      rec.onend = () => {
-        if (ended) return
-        rec = undefined
+      const chunks: Blob[] = []
+      recorder = new MediaRecorder(stream, { mimeType: format.mimeType })
+      recorder.ondataavailable = (e) => e.data.size && chunks.push(e.data)
+      recorder.onstop = async () => {
+        const wasHeard = spoke
         teardown()
-        submit(heard)
+        if (g !== gen.current || !wasHeard) return setPhase("idle")
+        setPhase("thinking")
+        setCaption("...")
+        try {
+          const form = new FormData()
+          form.append("file", new Blob(chunks, { type: format.mimeType }), `voice.${format.ext}`)
+          const res = await fetch("/api/voice/transcribe", { method: "POST", body: form })
+          const body = (await res.json().catch(() => ({}))) as { text?: string; error?: string }
+          if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`)
+          if (g === gen.current) submit(body.text ?? "")
+        } catch (err) {
+          toast({ title: `Transcription failed: ${(err as Error).message}`, status: "error" })
+          setPhase("idle")
+        }
       }
-      rec.start()
-    })()
+      recorder.start()
+      raf = requestAnimationFrame(tick)
+    }
+
+    if (!SR) return void record()
+
+    // Recognizer path: the recognizer owns the microphone (Android runs it in a
+    // separate app), so we open no stream; the orb pulses on recognizer events.
+    setPhase("listening")
+    setCaption("")
+    let pulse = 0
+    const decay = () => {
+      pulse *= 0.9
+      orbRef.current?.style.setProperty("--orb-level", pulse.toFixed(2))
+      raf = requestAnimationFrame(decay)
+    }
+    raf = requestAnimationFrame(decay)
+    rec = new SR()
+    rec.lang = langRef.current
+    rec.interimResults = true
+    rec.continuous = false
+    rec.onsoundstart = rec.onspeechstart = () => {
+      pulse = 0.7
+    }
+    rec.onresult = (e) => {
+      pulse = 0.7
+      heard = Array.from(e.results)
+        .map((r) => r[0].transcript)
+        .join(" ")
+      setCaption(heard)
+    }
+    rec.onerror = (e) => {
+      if (ended) return
+      rec!.onend = null
+      rec = undefined
+      // The recognizer cannot work here; the recorder path does the job.
+      if (["audio-capture", "service-not-allowed", "network", "language-not-supported"].includes(e.error)) {
+        return void record()
+      }
+      teardown()
+      if (e.error === "not-allowed") toast({ title: "Microphone permission denied", status: "error" })
+      else if (e.error !== "no-speech" && e.error !== "aborted") {
+        toast({ title: `Voice error: ${e.error}`, status: "error" })
+      }
+      setPhase("idle")
+    }
+    rec.onend = () => {
+      if (ended) return
+      rec = undefined
+      teardown()
+      submit(heard)
+    }
+    rec.start()
   }
 
   // Mount: restore the language, start listening when opened by a tap. Unmount
