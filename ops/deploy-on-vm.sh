@@ -8,6 +8,10 @@
 # built, so what runs here is the commit that was tested, not whatever
 # :latest happens to be.
 #
+# The workflow also sends the actor and its run token on stdin (two lines) so
+# this host can log in to ghcr for the pull; without stdin input the pull is
+# attempted with whatever credentials docker already has.
+#
 # Rolling out a bad image is the risk this guards: the previously running image
 # is restored if the new container does not report healthy.
 set -euo pipefail
@@ -38,6 +42,15 @@ dc() {
 git -C "$ROOT" pull --ff-only || echo "note: infra checkout not updated (continuing)"
 
 previous="$(docker inspect -f '{{.Image}}' "$CONTAINER" 2>/dev/null || true)"
+
+actor=""; token=""
+read -r -t 5 actor || true
+read -r -t 5 token || true
+if [ -n "$actor" ] && [ -n "$token" ]; then
+  printf '%s' "$token" | docker login ghcr.io -u "$actor" --password-stdin >/dev/null
+  trap 'docker logout ghcr.io >/dev/null 2>&1' EXIT
+fi
+unset token
 
 echo "pulling ${IMAGE_REPO}:${tag}"
 docker pull -q "${IMAGE_REPO}:${tag}"
