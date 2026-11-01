@@ -1,6 +1,5 @@
-// Dictation: record with MediaRecorder, transcribe on our own speaches
-// container via /api/voice/transcribe. Replaced the Web Speech API, which is
-// Chrome-and-Safari-only and ships the audio to Google or Apple.
+// Recording format for the voice mode recorder fallback; transcribed via
+// /api/voice/transcribe.
 
 // Container formats in preference order. Chrome/Android/Firefox record webm;
 // iOS Safari records only mp4. The upload's extension has to match: OpenAI-style
@@ -22,12 +21,4 @@ export function recordingFormat(
 ): RecordingFormat | null {
   if (!isTypeSupported) return null
   return FORMATS.find((f) => isTypeSupported(f.mimeType)) ?? null
-}
-
-/** What to put in the textarea: what was typed before, plus what was said. */
-export function mergeDictation(base: string, transcript: string): string {
-  const spoken = transcript.trim()
-  if (!spoken) return base
-  if (!base) return spoken
-  return base.endsWith(" ") ? base + spoken : `${base} ${spoken}`
 }

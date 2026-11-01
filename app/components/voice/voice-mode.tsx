@@ -3,7 +3,7 @@
 import { PersonaAvatar } from "@/app/components/layout/persona-switcher"
 import { VoiceOrb, type VoicePhase } from "@/app/components/voice/voice-orb"
 import { useProfiles } from "@/app/hooks/use-profiles"
-import { recordingFormat } from "@/app/components/chat-input/dictation"
+import { recordingFormat } from "@/lib/voice-recording"
 import { Button } from "@/components/ui/button"
 import { toast } from "@/components/ui/toast"
 import { takeSpeech } from "@/lib/voice-sentences"

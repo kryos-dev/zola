@@ -10,7 +10,7 @@ async function profileFor(request: Request, userId: string) {
   return p && isProfile(p) ? p : activeProfile(userId)
 }
 
-// Dictation: the browser's recording in, {text} out. The dashboard route takes
+// Voice mode recorder fallback: the browser's recording in, {text} out. The dashboard route takes
 // a JSON body with the audio as a base64 data url, so the upload is re-encoded
 // here.
 export async function POST(request: Request) {

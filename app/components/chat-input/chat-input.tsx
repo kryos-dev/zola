@@ -16,7 +16,6 @@ import { useRouter } from "next/navigation"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { PromptSystem } from "../suggestions/prompt-system"
 import { ButtonFileUpload } from "./button-file-upload"
-import { ButtonVoice } from "./button-voice"
 import { FileList } from "./file-list"
 import { ThinkingEffortSelect } from "./thinking-effort-select"
 import { ContextMeter } from "./context-meter"
@@ -318,11 +317,6 @@ export function ChatInput({
                 <WaveformIcon className="size-4" />
               </Button>
             ) : null}
-            <ButtonVoice
-              value={value}
-              onValueChange={onValueChange}
-              disabled={isSubmitting}
-            />
             <PromptInputAction
               tooltip={
                 sendIntent === "queue"

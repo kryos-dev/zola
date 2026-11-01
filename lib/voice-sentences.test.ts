@@ -2,6 +2,7 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import { speakable, takeSpeech } from "./voice-sentences"
+import { recordingFormat } from "./voice-recording"
 
 test("speakable strips markdown and emoji", () => {
   assert.equal(speakable("## **Hi** there 😀 see [docs](http://x.y) `ls`"), "Hi there see docs ls")
@@ -30,3 +31,14 @@ test("an open code fence is held until it closes", () => {
   assert.deepEqual(r.chunks, ["Here is the code you need."])
   assert.deepEqual(takeSpeech("```py\nprint(1)", 0, true).chunks, [])
 })
+
+// Chrome / Android: webm with opus wins.
+assert.deepEqual(recordingFormat((t) => t.startsWith("audio/webm")), {
+  mimeType: "audio/webm;codecs=opus",
+  ext: "webm",
+})
+// iOS Safari: only mp4, and the file must be named .mp4 to match.
+assert.deepEqual(recordingFormat((t) => t === "audio/mp4"), { mimeType: "audio/mp4", ext: "mp4" })
+// Nothing supported, or no MediaRecorder at all (node): no button.
+assert.equal(recordingFormat(() => false), null)
+assert.equal(recordingFormat(undefined), null)
