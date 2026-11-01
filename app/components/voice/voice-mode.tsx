@@ -28,27 +28,13 @@ let sharedAudio: HTMLAudioElement | undefined
 const SILENT_WAV =
   "data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA="
 function audioEl() {
-  return (sharedAudio ??= new Audio())
-}
-
-// An element can be connected to a MediaElementSource only once, so the output
-// meter lives at module level. Null means unavailable: the orb falls back to a fixed level.
-let outMeter: { ctx: AudioContext; analyser: AnalyserNode; buf: Uint8Array<ArrayBuffer> } | null | undefined
-function outputMeter() {
-  if (outMeter === undefined) {
-    try {
-      const ctx = new AudioContext()
-      const analyser = ctx.createAnalyser()
-      analyser.fftSize = 512
-      const src = ctx.createMediaElementSource(audioEl())
-      src.connect(analyser)
-      analyser.connect(ctx.destination)
-      outMeter = { ctx, analyser, buf: new Uint8Array(analyser.fftSize) }
-    } catch {
-      outMeter = null
-    }
+  if (!sharedAudio) {
+    sharedAudio = new Audio()
+    sharedAudio.volume = 1
+    sharedAudio.muted = false
+    sharedAudio.setAttribute("playsinline", "")
   }
-  return outMeter
+  return sharedAudio
 }
 function rms(analyser: AnalyserNode, buf: Uint8Array<ArrayBuffer>) {
   analyser.getByteTimeDomainData(buf)
@@ -96,16 +82,14 @@ export function VoiceMode({ messages, status, autoStart, onSend, onAbort, onClos
   const props = useRef({ onSend, onAbort, onUnlock })
   props.current = { onSend, onAbort, onUnlock }
 
-  // Runs inside a tap: unlocks playback and the output meter's AudioContext.
+  // Runs inside a tap, before any await: unlocks the shared element for later plays.
   const unlockAudio = () => {
-    outputMeter()
     audioEl().src = SILENT_WAV
     void audioEl().play().catch(() => {})
   }
   const getOutputVolume = () => {
     if (!playing.current) return 0
-    const m = outMeter
-    return m ? Math.min(1, rms(m.analyser, m.buf) * 3) : 0.6
+    return 0.55 + 0.25 * Math.sin(performance.now() / 150)
   }
   const getInputVolume = () => inLevel.current
 
@@ -134,7 +118,6 @@ export function VoiceMode({ messages, status, autoStart, onSend, onAbort, onClos
       return g === gen.current ? void playNext() : undefined
     }
     const audio = audioEl()
-    void outputMeter()?.ctx.resume().catch(() => {})
     const done = () => {
       audio.onended = audio.onerror = null
       URL.revokeObjectURL(url)
@@ -144,7 +127,11 @@ export function VoiceMode({ messages, status, autoStart, onSend, onAbort, onClos
     audio.onended = audio.onerror = done
     audio.src = url
     setPhase("speaking")
-    audio.play().catch(done)
+    audio.play().catch((err: Error) => {
+      if (g !== gen.current) return
+      toast({ title: `Playback blocked: ${err.name} ${err.message}`, status: "error" })
+      done()
+    })
   }
 
   const speak = (text: string) => {
