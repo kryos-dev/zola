@@ -26,10 +26,13 @@ function entries(): Entry[] {
   ]
 }
 
-export type ProfileInfo = { name: string; label: string }
+// One-line job description shown on the Team screen, keyed by profile name.
+const ROLES: Record<string, string> = { [DEFAULT_PROFILE]: "Ops", nila: "Support" }
+
+export type ProfileInfo = { name: string; label: string; role: string }
 
 export function listProfiles(): ProfileInfo[] {
-  return entries().map(({ name, label }) => ({ name, label }))
+  return entries().map(({ name, label }) => ({ name, label, role: ROLES[name] ?? "Agent" }))
 }
 
 export function isProfile(name: string): boolean {

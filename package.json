@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint .",
-    "test": "node --import tsx scripts/hermes-stream.test.mjs && node --import tsx lib/blobs.test.ts && node --import tsx lib/canvas/parse.test.ts && node --import tsx app/components/chat-input/slash-commands.test.ts && node --import tsx lib/speech-chunks.test.ts && node --import tsx lib/parts.test.ts && node --import tsx lib/media-tags.test.ts && node --import tsx lib/queued-turns.test.ts && node --import tsx lib/chat-send-intent.test.ts && node --import tsx lib/assistant-reply.test.ts && node --import tsx lib/runs.test.ts && node --import tsx lib/hermes/history.test.ts && node --import tsx lib/hermes/profiles.test.ts && node --import tsx lib/voice-sentences.test.ts && node --import tsx lib/auth/paths.test.ts && node --import tsx lib/tasks.test.ts",
+    "test": "node --import tsx scripts/hermes-stream.test.mjs && node --import tsx lib/blobs.test.ts && node --import tsx lib/canvas/parse.test.ts && node --import tsx app/components/chat-input/slash-commands.test.ts && node --import tsx lib/speech-chunks.test.ts && node --import tsx lib/parts.test.ts && node --import tsx lib/media-tags.test.ts && node --import tsx lib/queued-turns.test.ts && node --import tsx lib/chat-send-intent.test.ts && node --import tsx lib/assistant-reply.test.ts && node --import tsx lib/runs.test.ts && node --import tsx lib/hermes/history.test.ts && node --import tsx lib/hermes/profiles.test.ts && node --import tsx lib/hermes/team.test.ts && node --import tsx lib/voice-sentences.test.ts && node --import tsx lib/auth/paths.test.ts && node --import tsx lib/tasks.test.ts",
     "type-check": "tsc --noEmit",
     "db:push": "drizzle-kit push",
     "db:migrate": "drizzle-kit migrate",

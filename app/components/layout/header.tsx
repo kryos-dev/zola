@@ -5,11 +5,12 @@ import { HeaderSidebarTrigger } from "@/app/components/layout/header-sidebar-tri
 import { TaskTray } from "@/app/components/tasks/task-tray"
 import { PersonaSwitcher } from "@/app/components/layout/persona-switcher"
 import { NewConversationButton } from "@/app/components/session/new-conversation"
+import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { useSidebar } from "@/components/ui/sidebar"
 import { APP_NAME } from "@/lib/config"
 import { cn } from "@/lib/utils"
-import { FolderIcon } from "@phosphor-icons/react"
+import { FolderIcon, UsersThreeIcon } from "@phosphor-icons/react"
 import { useQuery } from "@tanstack/react-query"
 import Link from "next/link"
 
@@ -65,6 +66,11 @@ export function Header({ hasSidebar }: { hasSidebar: boolean }) {
           ) : null}
         </div>
         <div className="pointer-events-auto flex items-center gap-1">
+          <Button asChild variant="ghost" size="icon" className="size-12 md:size-9" aria-label="Team">
+            <Link href="/team">
+              <UsersThreeIcon className="size-5" />
+            </Link>
+          </Button>
           <TaskTray />
           <NewConversationButton />
           <ButtonTheme />
