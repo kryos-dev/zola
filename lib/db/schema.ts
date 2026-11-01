@@ -1,5 +1,6 @@
 import {
   boolean,
+  index,
   integer,
   jsonb,
   pgTable,
@@ -86,6 +87,26 @@ export const userSessions = pgTable(
     updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
   },
   (t) => [primaryKey({ columns: [t.userId, t.profile] })]
+)
+
+// Background tasks: Hermes detached runs (POST /v1/runs). Hermes has no list
+// endpoint for runs, so the ids the user started are kept here; the run itself
+// (status, events, output) stays in Hermes. `status` caches a terminal state so
+// finished runs need no further Hermes lookups.
+export const userTasks = pgTable(
+  "user_tasks",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    profile: text("profile").notNull().default("default"),
+    runId: text("run_id").notNull().unique(),
+    title: text("title").notNull(),
+    status: text("status").notNull().default("running"),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow().notNull(),
+  },
+  (t) => [index("user_tasks_user_created_idx").on(t.userId, t.createdAt)]
 )
 
 export const userKeys = pgTable(

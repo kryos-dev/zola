@@ -116,6 +116,7 @@ export function ChatInput({
         rest: slash?.rest ?? "",
         setReasoningEffort: onReasoningEffortChange,
         newChat: () => router.push("/"),
+        send: onSend,
       })
       setSlashDismissed(true)
       requestAnimationFrame(() => textareaRef.current?.focus())
@@ -125,6 +126,7 @@ export function ChatInput({
       slash?.rest,
       onReasoningEffortChange,
       router,
+      onSend,
     ]
   )
 

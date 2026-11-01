@@ -60,6 +60,7 @@ function main() {
     },
     rest: "the quarterly numbers",
     newChat: () => assert.fail("summarize must not navigate"),
+    send: () => assert.fail("summarize must not send"),
   })
   assert.ok(
     written !== null && String(written).includes("the quarterly numbers"),

@@ -2,6 +2,7 @@
 
 import { ButtonTheme } from "@/app/components/layout/button-theme"
 import { HeaderSidebarTrigger } from "@/app/components/layout/header-sidebar-trigger"
+import { TaskTray } from "@/app/components/tasks/task-tray"
 import { PersonaSwitcher } from "@/app/components/layout/persona-switcher"
 import { NewConversationButton } from "@/app/components/session/new-conversation"
 import { Badge } from "@/components/ui/badge"
@@ -64,6 +65,7 @@ export function Header({ hasSidebar }: { hasSidebar: boolean }) {
           ) : null}
         </div>
         <div className="pointer-events-auto flex items-center gap-1">
+          <TaskTray />
           <NewConversationButton />
           <ButtonTheme />
         </div>

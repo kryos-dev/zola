@@ -8,6 +8,7 @@ import { useModel } from "@/app/components/chat/use-model"
 import { useWorkspace } from "@/app/components/workspace/workspace-provider"
 import { useChatDraft } from "@/app/hooks/use-chat-draft"
 import { toast } from "@/components/ui/toast"
+import { startTask } from "@/app/components/tasks/use-tasks"
 import { getOrCreateGuestUserId } from "@/lib/api"
 import { textFromMessage, type ZolaUIMessage } from "@/lib/hermes/types"
 import { fetchHistory } from "@/lib/history-client"
@@ -325,6 +326,24 @@ export function ChatView({ history, pending, nextCursor, voice, onVoiceChange }:
     }
     if (!text.trim() && files.length === 0) return
 
+    // "/task <job>" hands the job to the agent as a background task instead of
+    // a chat turn; the composer is free again at once.
+    const job = /^\/task\s+([\s\S]+)$/.exec(text)?.[1]?.trim()
+    if (job) {
+      try {
+        await startTask(job)
+        if (text === input) {
+          setInput("")
+          clearDraft()
+        }
+        toast({ title: "Task started. Follow it from the tasks button.", status: "success" })
+        void queryClient.invalidateQueries({ queryKey: ["tasks"] })
+      } catch {
+        toast({ title: "Could not start the task", status: "error" })
+      }
+      return
+    }
+
     const turn: QueuedTurnRequest = {
       id: crypto.randomUUID(),
       text,
@@ -447,6 +466,9 @@ export function ChatView({ history, pending, nextCursor, voice, onVoiceChange }:
             <h1 className="mb-6 text-3xl font-medium tracking-tight">
               What&apos;s on your mind?
             </h1>
+            <p className="text-muted-foreground -mt-3 mb-6 text-sm">
+              Start with <code>/task</code> to run a long job in the background.
+            </p>
           </motion.div>
         ) : history === undefined ? (
           <div key="loading" className="flex w-full max-w-3xl flex-col gap-6 px-4 pt-10 sm:px-6">

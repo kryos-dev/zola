@@ -21,6 +21,12 @@ import { parseJsonOr } from "./parts"
 //   done                                                -> finish if nothing finished the stream yet
 // run.started, message.started and approval.request have no stream equivalent.
 //
+// The same mapper reads the detached-run stream (`GET /v1/runs/{id}/events`,
+// lib/tasks.ts): frames there have no `event:` line (the name is `data.event`)
+// and use message.delta, `tool` instead of `tool_name`, `error` on
+// tool.completed, subagent.start / subagent.complete (shown as a "subagent"
+// tool call keyed by subagent_id) and the final `output` on run.completed.
+//
 // Tool events carry no call id, so one is minted per tool.started and the
 // matching tool.completed / tool.failed (same tool_name, oldest first) closes it.
 //
@@ -57,6 +63,8 @@ async function writeHermesSession(
   // Minted call ids of tools still running, per tool_name, oldest first.
   const running = new Map<string, string[]>()
   let toolCount = 0
+  // Running subagents (detached runs only), subagent_id -> minted call id.
+  const subagents = new Map<string, string>()
 
   writer.write({ type: "start", ...(messageId ? { messageId } : {}) })
 
@@ -141,9 +149,8 @@ async function writeHermesSession(
 
   const handleFrame = (frame: string) => {
     const lines = frame.split("\n")
-    const event = lines.find((l) => l.startsWith("event:"))?.slice(6).trim()
     const dataLine = lines.find((l) => l.startsWith("data:"))
-    if (!event || !dataLine) return
+    if (!dataLine) return
     const raw = dataLine.slice(5).trim()
     if (!raw) return
 
@@ -153,9 +160,14 @@ async function writeHermesSession(
     } catch {
       return
     }
+    const event =
+      lines.find((l) => l.startsWith("event:"))?.slice(6).trim() ||
+      (typeof data.event === "string" ? data.event : "")
+    if (!event) return
     const str = (v: unknown) => (typeof v === "string" ? v : "")
 
     switch (event) {
+      case "message.delta":
       case "assistant.delta": {
         writeTextDelta(str(data.delta))
         break
@@ -169,7 +181,7 @@ async function writeHermesSession(
       }
       case "tool.started": {
         closeTextIfOpen()
-        const toolName = str(data.tool_name)
+        const toolName = str(data.tool_name) || str(data.tool)
         const toolCallId = `hermes-tool-${toolCount++}`
         running.set(toolName, [...(running.get(toolName) ?? []), toolCallId])
         timer.start(toolCallId)
@@ -178,14 +190,58 @@ async function writeHermesSession(
           type: "tool-input-available",
           toolCallId,
           toolName,
-          input: data.args ?? {},
+          input: data.args ?? (str(data.preview) ? { preview: str(data.preview) } : {}),
         })
+        break
+      }
+      case "subagent.start": {
+        closeTextIfOpen()
+        const toolCallId = `hermes-tool-${toolCount++}`
+        subagents.set(str(data.subagent_id), toolCallId)
+        timer.start(toolCallId)
+        writer.write({ type: "tool-input-start", toolCallId, toolName: "subagent" })
+        writer.write({
+          type: "tool-input-available",
+          toolCallId,
+          toolName: "subagent",
+          input: { goal: data.goal },
+        })
+        break
+      }
+      case "subagent.complete": {
+        closeTextIfOpen()
+        const key = str(data.subagent_id)
+        const toolCallId = subagents.get(key)
+        if (!toolCallId) break
+        subagents.delete(key)
+        timer.end(toolCallId)
+        if (data.status === "failed" || data.status === "error") {
+          writer.write({
+            type: "tool-output-error",
+            toolCallId,
+            errorText: str(data.summary) || "Subagent failed",
+          })
+        } else {
+          writer.write({
+            type: "tool-output-available",
+            toolCallId,
+            output: { summary: data.summary, status: data.status },
+          })
+        }
         break
       }
       case "tool.completed": {
         closeTextIfOpen()
-        const toolCallId = endTool(str(data.tool_name))
+        const toolCallId = endTool(str(data.tool_name) || str(data.tool))
         if (!toolCallId) break
+        if (data.error === true) {
+          writer.write({
+            type: "tool-output-error",
+            toolCallId,
+            errorText: str(data.preview) || "Tool failed",
+          })
+          break
+        }
         writer.write({
           type: "tool-output-available",
           toolCallId,
@@ -195,7 +251,7 @@ async function writeHermesSession(
       }
       case "tool.failed": {
         closeTextIfOpen()
-        const toolCallId = endTool(str(data.tool_name))
+        const toolCallId = endTool(str(data.tool_name) || str(data.tool))
         if (!toolCallId) break
         writer.write({
           type: "tool-output-error",
@@ -237,7 +293,18 @@ async function writeHermesSession(
       }
       case "run.completed":
       case "run.cancelled": {
+        // A detached run carries its final answer as `output`; treat it as the
+        // session stream's assistant.completed.
+        if (str(data.output)) {
+          handleFrame(
+            `data: ${JSON.stringify({ event: "assistant.completed", content: data.output })}`
+          )
+        }
         finish(data.usage as Record<string, number> | undefined)
+        break
+      }
+      case "run.interrupted": {
+        fail(str(data.error) || "The run was interrupted")
         break
       }
       case "run.failed":

@@ -18,6 +18,8 @@ export type SlashContext = {
   setReasoningEffort?: (effort: string) => void
   /** Navigate to a fresh chat. */
   newChat: () => void
+  /** Submit the composer as it stands. */
+  send: () => void
 }
 
 export type SlashCommand = {
@@ -43,6 +45,13 @@ export const SLASH_COMMANDS: SlashCommand[] = [
       setReasoningEffort?.("high")
       setValue(rest)
     },
+  },
+  {
+    name: "task",
+    hint: "Run the job in the background as a task",
+    // Without a job it only fills in the prefix; with one the composer
+    // (/task <job>) is submitted and chat-view starts the task.
+    run: ({ setValue, rest, send }) => (rest ? send() : setValue("/task ")),
   },
   {
     name: "new",
