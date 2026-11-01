@@ -1,6 +1,7 @@
 "use client"
 
 import { ChatInput } from "@/app/components/chat-input/chat-input"
+import { VoiceMode } from "@/app/components/voice/voice-mode"
 import { Conversation } from "@/app/components/chat/conversation"
 import { useFileUpload } from "@/app/components/chat/use-file-upload"
 import { useModel } from "@/app/components/chat/use-model"
@@ -45,6 +46,8 @@ const isNetworkError = (error: Error) =>
   (typeof navigator !== "undefined" && !navigator.onLine)
 
 type ChatViewProps = {
+  voice: { open: boolean; autoStart: boolean }
+  onVoiceChange: (v: { open: boolean; autoStart: boolean }) => void
   /** Rows loaded from the server; useChat starts from them and owns the list after. Undefined while loading. */
   history: ZolaUIMessage[] | undefined
   /** The server is still running a turn for this chat. */
@@ -53,7 +56,7 @@ type ChatViewProps = {
   nextCursor: { before: number; compacted: boolean } | null
 }
 
-export function ChatView({ history, pending, nextCursor }: ChatViewProps) {
+export function ChatView({ history, pending, nextCursor, voice, onVoiceChange }: ChatViewProps) {
   const { user } = useUser()
   const { preferences } = useUserPreferences()
   const { draftValue, clearDraft, setDraftValue } = useChatDraft()
@@ -363,8 +366,20 @@ export function ChatView({ history, pending, nextCursor }: ChatViewProps) {
           reasoningEffort={reasoningEffort}
           onReasoningEffortChange={setReasoningEffort}
           turnUsage={turnFromParts(lastAssistant?.parts)?.usage}
+          onVoiceMode={() => onVoiceChange({ open: true, autoStart: true })}
         />
       </motion.div>
+      {voice.open && history !== undefined ? (
+        <VoiceMode
+          messages={messages}
+          status={status}
+          autoStart={voice.autoStart}
+          onSend={(text) => void submit(text)}
+          onAbort={() => void stop()}
+          onClose={() => onVoiceChange({ open: false, autoStart: false })}
+          onUnlock={() => !voice.autoStart && onVoiceChange({ ...voice, autoStart: true })}
+        />
+      ) : null}
     </div>
   )
 }

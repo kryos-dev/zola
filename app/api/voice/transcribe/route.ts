@@ -1,6 +1,14 @@
 import { getCurrentUser } from "@/lib/auth"
+import { activeProfile } from "@/lib/hermes/client"
+import { isProfile } from "@/lib/hermes/profiles"
 import { NextResponse } from "next/server"
 import { dashboardFetch, upstreamError } from "@/lib/cloud9/dashboard"
+
+// ?profile=<name> picks the persona whose voice/model Hermes uses; the active one by default.
+async function profileFor(request: Request, userId: string) {
+  const p = new URL(request.url).searchParams.get("profile")
+  return p && isProfile(p) ? p : activeProfile(userId)
+}
 
 // Dictation: the browser's recording in, {text} out. The dashboard route takes
 // a JSON body with the audio as a base64 data url, so the upload is re-encoded
@@ -19,7 +27,7 @@ export async function POST(request: Request) {
   const b64 = Buffer.from(await file.arrayBuffer()).toString("base64")
 
   try {
-    const res = await dashboardFetch("/api/audio/transcribe", {
+    const res = await dashboardFetch(`/api/audio/transcribe?profile=${encodeURIComponent(await profileFor(request, user.id))}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ data_url: `data:${mime};base64,${b64}`, mime_type: mime }),

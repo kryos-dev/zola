@@ -3,10 +3,16 @@
 import { ChatView } from "@/app/components/chat/chat-view"
 import { fetchHistory } from "@/lib/history-client"
 import { useQuery } from "@tanstack/react-query"
+import { useSearchParams } from "next/navigation"
+import { useState } from "react"
 
 // The one rolling conversation: the transcript is Hermes' session, loaded from
 // /api/history; there is no chat id.
 export function Chat() {
+  // Voice mode lives here, above ChatView, so a persona switch (which remounts
+  // the view on the new session) does not close it. `autoStart` is false when
+  // the PWA shortcut opened it: no tap yet, so audio is still locked.
+  const [voice, setVoice] = useState({ open: useSearchParams().get("voice") === "1", autoStart: false })
   const { data: history, isError } = useQuery({
     queryKey: ["history"],
     queryFn: () => fetchHistory(),
@@ -32,6 +38,8 @@ export function Chat() {
       // reattach found nothing to resume), which re-seeds useChat from them.
       key={rows ? `${history?.profile}:${rows.length}:${rows.at(-1)?.id}:${pending}` : "loading"}
       history={rows}
+      voice={voice}
+      onVoiceChange={setVoice}
       pending={pending}
       nextCursor={
         history && history.nextCursor !== null

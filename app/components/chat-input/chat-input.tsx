@@ -10,7 +10,7 @@ import {
   PromptInputTextarea,
 } from "@/components/prompt-kit/prompt-input"
 import { Button } from "@/components/ui/button"
-import { ArrowUpIcon, StopIcon } from "@phosphor-icons/react"
+import { ArrowUpIcon, StopIcon, WaveformIcon } from "@phosphor-icons/react"
 import { useRouter } from "next/navigation"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { PromptSystem } from "../suggestions/prompt-system"
@@ -42,6 +42,8 @@ type ChatInputProps = {
   quotedText?: { text: string; messageId: string } | null
   reasoningEffort?: string
   onReasoningEffortChange?: (effort: string) => void
+  /** Opens the full-screen voice conversation. */
+  onVoiceMode?: () => void
   turnUsage?: LanguageModelUsage
 }
 
@@ -63,6 +65,7 @@ export function ChatInput({
   quotedText,
   reasoningEffort,
   onReasoningEffortChange,
+  onVoiceMode,
   turnUsage,
 }: ChatInputProps) {
   // Hermes accepts text and image parts only (client.ts sends images); other
@@ -303,6 +306,18 @@ export function ChatInput({
               <ContextMeter usage={turnUsage} modelId={selectedModel} />
             </div>
             <div className="flex shrink-0 items-center gap-1">
+            {onVoiceMode ? (
+              <Button
+                size="icon-sm"
+                variant="outline"
+                className="rounded-full"
+                type="button"
+                onClick={onVoiceMode}
+                aria-label="Voice mode"
+              >
+                <WaveformIcon className="size-4" />
+              </Button>
+            ) : null}
             <ButtonVoice
               value={value}
               onValueChange={onValueChange}

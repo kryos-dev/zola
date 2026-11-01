@@ -1,6 +1,14 @@
 import { getCurrentUser } from "@/lib/auth"
+import { activeProfile } from "@/lib/hermes/client"
+import { isProfile } from "@/lib/hermes/profiles"
 import { NextResponse } from "next/server"
 import { dashboardFetch, upstreamError } from "@/lib/cloud9/dashboard"
+
+// ?profile=<name> picks the persona whose voice/model Hermes uses; the active one by default.
+async function profileFor(request: Request, userId: string) {
+  const p = new URL(request.url).searchParams.get("profile")
+  return p && isProfile(p) ? p : activeProfile(userId)
+}
 
 // Read aloud: {text} in, audio bytes out. The dashboard returns the audio as a
 // base64 data url, which is decoded here.
@@ -14,7 +22,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    const res = await dashboardFetch("/api/audio/speak", {
+    const res = await dashboardFetch(`/api/audio/speak?profile=${encodeURIComponent(await profileFor(request, user.id))}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ text }),
