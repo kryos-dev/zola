@@ -1,40 +1,25 @@
 "use client"
 
 import { PersonaAvatar } from "@/app/components/layout/persona-switcher"
-import { VoiceOrb, type VoicePhase } from "@/app/components/voice/voice-orb"
 import { useProfiles } from "@/app/hooks/use-profiles"
 import { recordingFormat } from "@/lib/voice-recording"
 import { Button } from "@/components/ui/button"
 import { toast } from "@/components/ui/toast"
 import { takeSpeech } from "@/lib/voice-sentences"
-import { cn } from "@/lib/utils"
 import { MicrophoneIcon, MicrophoneSlashIcon, XIcon } from "@phosphor-icons/react"
 import type { UIMessage } from "ai"
+import dynamic from "next/dynamic"
 import { useEffect, useRef, useState } from "react"
 
-const LANG_KEY = "kryos-voice-lang"
-const LANGS = [
-  { code: "en-IN", label: "EN" },
-  { code: "ta-IN", label: "TA" },
-] as const
-// Fallback recorder: stop after this much silence once speech was heard, or at the cap.
-const SILENCE_MS = 1400
+// Capture stops after this much silence once speech was heard, or at the cap.
+const SILENCE_MS = 1200
 const MAX_RECORD_MS = 30_000
 const SPEECH_LEVEL = 0.06
 
-type Recognition = {
-  lang: string
-  interimResults: boolean
-  continuous: boolean
-  onsoundstart: (() => void) | null
-  onspeechstart: (() => void) | null
-  onresult: ((e: { results: ArrayLike<ArrayLike<{ transcript: string }> & { isFinal: boolean }> }) => void) | null
-  onerror: ((e: { error: string }) => void) | null
-  onend: (() => void) | null
-  start: () => void
-  stop: () => void
-  abort: () => void
-}
+type VoicePhase = "idle" | "listening" | "thinking" | "speaking"
+const AGENT_STATE = { idle: null, listening: "listening", thinking: "thinking", speaking: "talking" } as const
+
+const Orb = dynamic(() => import("@/components/ui/orb").then((m) => m.Orb), { ssr: false })
 
 // One audio element for the whole app session: a browser that wants a user
 // gesture to start playback unlocks it once, and it stays unlocked when voice
@@ -46,11 +31,30 @@ function audioEl() {
   return (sharedAudio ??= new Audio())
 }
 
-declare global {
-  interface Window {
-    SpeechRecognition?: unknown
-    webkitSpeechRecognition?: unknown
+// An element can be connected to a MediaElementSource only once, so the output
+// meter lives at module level. Null means unavailable: the orb falls back to a fixed level.
+let outMeter: { ctx: AudioContext; analyser: AnalyserNode; buf: Uint8Array<ArrayBuffer> } | null | undefined
+function outputMeter() {
+  if (outMeter === undefined) {
+    try {
+      const ctx = new AudioContext()
+      const analyser = ctx.createAnalyser()
+      analyser.fftSize = 512
+      const src = ctx.createMediaElementSource(audioEl())
+      src.connect(analyser)
+      analyser.connect(ctx.destination)
+      outMeter = { ctx, analyser, buf: new Uint8Array(analyser.fftSize) }
+    } catch {
+      outMeter = null
+    }
   }
+  return outMeter
+}
+function rms(analyser: AnalyserNode, buf: Uint8Array<ArrayBuffer>) {
+  analyser.getByteTimeDomainData(buf)
+  let sum = 0
+  for (const v of buf) sum += ((v - 128) / 128) ** 2
+  return Math.sqrt(sum / buf.length)
 }
 
 type Props = {
@@ -69,13 +73,15 @@ export function VoiceMode({ messages, status, autoStart, onSend, onAbort, onClos
   const { profiles, active, switchTo } = useProfiles()
   const [phase, setPhase] = useState<VoicePhase>("idle")
   const [caption, setCaption] = useState("")
-  const [lang, setLang] = useState<string>(LANGS[0].code)
   const [muted, setMuted] = useState(false)
-  const orbRef = useRef<HTMLButtonElement>(null)
+  const inLevel = useRef(0) // microphone level 0-1, read by the orb
+  const profileRef = useRef(active)
+  profileRef.current = active
 
   // Everything the callbacks below need lives in refs so they never go stale.
   const mutedRef = useRef(false)
-  const langRef = useRef<string>(LANGS[0].code)
+  const profileUrl = (path: string) =>
+    profileRef.current ? `${path}?profile=${encodeURIComponent(profileRef.current)}` : path
   const gen = useRef(0) // bumped by every new turn / interruption; stale async work checks it
   const stopListening = useRef<(() => void) | null>(null)
   const queue = useRef<Promise<string | null>[]>([])
@@ -89,6 +95,19 @@ export function VoiceMode({ messages, status, autoStart, onSend, onAbort, onClos
   messagesRef.current = messages
   const props = useRef({ onSend, onAbort, onUnlock })
   props.current = { onSend, onAbort, onUnlock }
+
+  // Runs inside a tap: unlocks playback and the output meter's AudioContext.
+  const unlockAudio = () => {
+    outputMeter()
+    audioEl().src = SILENT_WAV
+    void audioEl().play().catch(() => {})
+  }
+  const getOutputVolume = () => {
+    if (!playing.current) return 0
+    const m = outMeter
+    return m ? Math.min(1, rms(m.analyser, m.buf) * 3) : 0.6
+  }
+  const getInputVolume = () => inLevel.current
 
   const listen = useRef<() => void>(() => {})
   const finishTurn = () => {
@@ -115,6 +134,7 @@ export function VoiceMode({ messages, status, autoStart, onSend, onAbort, onClos
       return g === gen.current ? void playNext() : undefined
     }
     const audio = audioEl()
+    void outputMeter()?.ctx.resume().catch(() => {})
     const done = () => {
       audio.onended = audio.onerror = null
       URL.revokeObjectURL(url)
@@ -131,7 +151,7 @@ export function VoiceMode({ messages, status, autoStart, onSend, onAbort, onClos
     const g = gen.current
     // Fetched at once, played in order, so synthesis overlaps playback.
     queue.current.push(
-      fetch("/api/voice/speech", {
+      fetch(profileUrl("/api/voice/speech"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ text }),
@@ -170,40 +190,28 @@ export function VoiceMode({ messages, status, autoStart, onSend, onAbort, onClos
     stopListening.current?.()
     silence()
     const g = gen.current
-    const SR = (window.SpeechRecognition ?? window.webkitSpeechRecognition) as
-      | (new () => Recognition)
-      | undefined
     let stream: MediaStream | undefined
     let ctx: AudioContext | undefined
     let raf = 0
-    let rec: Recognition | undefined
     let recorder: MediaRecorder | undefined
     let ended = false
-    let heard = ""
 
     const teardown = () => {
       ended = true
       cancelAnimationFrame(raf)
-      orbRef.current?.style.setProperty("--orb-level", "0")
+      inLevel.current = 0
       stream?.getTracks().forEach((t) => t.stop())
       void ctx?.close().catch(() => {})
       stopListening.current = null
     }
-    // Stops capture; what was heard so far is sent (SpeechRecognition) or uploaded (recorder).
+    // Stops capture; what was recorded so far is uploaded.
     stopListening.current = () => {
       if (ended) return
-      if (rec) {
-        rec.onend = null
-        rec.stop()
-        teardown()
-        submit(heard)
-      } else if (recorder?.state === "recording") recorder.stop()
+      if (recorder?.state === "recording") recorder.stop()
       else teardown()
     }
 
-    // Recorder path: opens the mic itself, meters its level and stops on silence.
     const record = async () => {
-      cancelAnimationFrame(raf)
       const format = recordingFormat()
       if (!format) {
         toast({ title: "Voice input is not supported in this browser", status: "error" })
@@ -214,6 +222,7 @@ export function VoiceMode({ messages, status, autoStart, onSend, onAbort, onClos
         stream = await navigator.mediaDevices.getUserMedia({ audio: true })
       } catch (err) {
         toast({ title: `Microphone unavailable: ${(err as Error).message}`, status: "error" })
+        teardown()
         return setPhase("idle")
       }
       if (ended || g !== gen.current) return teardown()
@@ -230,11 +239,8 @@ export function VoiceMode({ messages, status, autoStart, onSend, onAbort, onClos
       let quietSince = performance.now()
       const startedAt = performance.now()
       const tick = () => {
-        analyser.getByteTimeDomainData(buf)
-        let sum = 0
-        for (const v of buf) sum += ((v - 128) / 128) ** 2
-        level = Math.max(Math.sqrt(sum / buf.length) * 3, level * 0.85)
-        orbRef.current?.style.setProperty("--orb-level", Math.min(1, level).toFixed(2))
+        level = Math.max(Math.min(1, rms(analyser, buf) * 3), level * 0.85)
+        inLevel.current = level
         const now = performance.now()
         if (level > SPEECH_LEVEL) {
           spoke = true
@@ -261,81 +267,26 @@ export function VoiceMode({ messages, status, autoStart, onSend, onAbort, onClos
         try {
           const form = new FormData()
           form.append("file", new Blob(chunks, { type: format.mimeType }), `voice.${format.ext}`)
-          const res = await fetch("/api/voice/transcribe", { method: "POST", body: form })
+          const res = await fetch(profileUrl("/api/voice/transcribe"), { method: "POST", body: form })
           const body = (await res.json().catch(() => ({}))) as { text?: string; error?: string }
           if (!res.ok) throw new Error(body.error ?? `HTTP ${res.status}`)
           if (g === gen.current) submit(body.text ?? "")
         } catch (err) {
           toast({ title: `Transcription failed: ${(err as Error).message}`, status: "error" })
-          setPhase("idle")
+          if (g === gen.current) setPhase("idle")
         }
       }
       recorder.start()
       raf = requestAnimationFrame(tick)
     }
-
-    if (!SR) return void record()
-
-    // Recognizer path: the recognizer owns the microphone (Android runs it in a
-    // separate app), so we open no stream; the orb pulses on recognizer events.
-    setPhase("listening")
-    setCaption("")
-    let pulse = 0
-    const decay = () => {
-      pulse *= 0.9
-      orbRef.current?.style.setProperty("--orb-level", pulse.toFixed(2))
-      raf = requestAnimationFrame(decay)
-    }
-    raf = requestAnimationFrame(decay)
-    rec = new SR()
-    rec.lang = langRef.current
-    rec.interimResults = true
-    rec.continuous = false
-    rec.onsoundstart = rec.onspeechstart = () => {
-      pulse = 0.7
-    }
-    rec.onresult = (e) => {
-      pulse = 0.7
-      heard = Array.from(e.results)
-        .map((r) => r[0].transcript)
-        .join(" ")
-      setCaption(heard)
-    }
-    rec.onerror = (e) => {
-      if (ended) return
-      rec!.onend = null
-      rec = undefined
-      // The recognizer cannot work here; the recorder path does the job.
-      if (["audio-capture", "service-not-allowed", "network", "language-not-supported"].includes(e.error)) {
-        return void record()
-      }
-      teardown()
-      if (e.error === "not-allowed") toast({ title: "Microphone permission denied", status: "error" })
-      else if (e.error !== "no-speech" && e.error !== "aborted") {
-        toast({ title: `Voice error: ${e.error}`, status: "error" })
-      }
-      setPhase("idle")
-    }
-    rec.onend = () => {
-      if (ended) return
-      rec = undefined
-      teardown()
-      submit(heard)
-    }
-    rec.start()
+    void record()
   }
 
-  // Mount: restore the language, start listening when opened by a tap. Unmount
-  // (close, or a persona switch rebuilding the chat) stops everything.
+  // Mount: start listening when opened by a tap. Unmount (close, or a persona
+  // switch rebuilding the chat) stops everything.
   useEffect(() => {
-    const stored = localStorage.getItem(LANG_KEY)
-    if (LANGS.some((l) => l.code === stored)) {
-      langRef.current = stored!
-      setLang(stored!)
-    }
     if (autoStart) {
-      audioEl().src = SILENT_WAV
-      void audioEl().play().catch(() => {})
+      unlockAudio()
       listen.current()
     }
     return () => {
@@ -376,15 +327,8 @@ export function VoiceMode({ messages, status, autoStart, onSend, onAbort, onClos
       awaiting.current = false
       props.current.onAbort()
     }
-    audioEl().src = SILENT_WAV
-    void audioEl().play().catch(() => {})
+    unlockAudio()
     listen.current()
-  }
-
-  const pickLang = (code: string) => {
-    langRef.current = code
-    setLang(code)
-    localStorage.setItem(LANG_KEY, code)
   }
   const toggleMute = () => {
     mutedRef.current = !mutedRef.current
@@ -411,7 +355,20 @@ export function VoiceMode({ messages, status, autoStart, onSend, onAbort, onClos
       </div>
 
       <div className="flex flex-1 flex-col items-center justify-center gap-6">
-        <VoiceOrb ref={orbRef} phase={phase} onClick={onOrb} />
+        <button
+          type="button"
+          onClick={onOrb}
+          aria-label={label}
+          className="size-[60vw] max-h-80 max-w-80 min-h-48 min-w-48 rounded-full"
+        >
+          <Orb
+            className="relative size-full"
+            agentState={AGENT_STATE[phase]}
+            volumeMode="manual"
+            getInputVolume={getInputVolume}
+            getOutputVolume={getOutputVolume}
+          />
+        </button>
         <div className="flex min-h-24 w-full max-w-md flex-col items-center gap-2 text-center">
           <p className="text-muted-foreground text-xs tracking-wide uppercase">{label}</p>
           <p className="line-clamp-4 text-base" aria-live="polite">
@@ -447,33 +404,17 @@ export function VoiceMode({ messages, status, autoStart, onSend, onAbort, onClos
           </div>
         ) : null}
         <div className="flex items-center gap-3">
-          <div className="flex rounded-full border p-0.5" role="group" aria-label="Language">
-            {LANGS.map((l) => (
-              <button
-                key={l.code}
-                type="button"
-                aria-pressed={lang === l.code}
-                onClick={() => pickLang(l.code)}
-                className={cn(
-                  "h-8 min-w-10 rounded-full px-3 text-sm font-medium",
-                  lang === l.code ? "bg-primary text-primary-foreground" : "text-muted-foreground"
-                )}
-              >
-                {l.label}
-              </button>
-            ))}
-          </div>
           <Button
             variant={muted ? "destructive" : "outline"}
             size="icon"
-            className="rounded-full"
+            className="size-12 rounded-full"
             onClick={toggleMute}
             aria-pressed={muted}
             aria-label={muted ? "Hands-free off, tap to turn on" : "Hands-free on, tap to turn off"}
           >
             {muted ? <MicrophoneSlashIcon className="size-5" /> : <MicrophoneIcon className="size-5" />}
           </Button>
-          <Button variant="outline" size="icon" className="rounded-full" onClick={onClose} aria-label="Close voice mode">
+          <Button variant="outline" size="icon" className="size-12 rounded-full" onClick={onClose} aria-label="Close voice mode">
             <XIcon className="size-5" />
           </Button>
         </div>

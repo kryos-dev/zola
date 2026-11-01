@@ -321,28 +321,3 @@ code {
 .prose :where(code)::after {
   content: none;
 }
-
-
-/* Voice mode orb: breathing while idle, a morphing blob while speaking, a
-   spinning ring while thinking. Listening is driven by --orb-level (0..1),
-   set from the microphone level in JS. */
-@keyframes orb-breathe {
-  0%, 100% { transform: scale(1); }
-  50% { transform: scale(1.06); }
-}
-@keyframes orb-morph {
-  0%, 100% { border-radius: 50% 50% 50% 50% / 50% 50% 50% 50%; transform: scale(1); }
-  25% { border-radius: 58% 42% 52% 48% / 46% 56% 44% 54%; transform: scale(1.08); }
-  50% { border-radius: 44% 56% 46% 54% / 54% 44% 56% 46%; transform: scale(0.97); }
-  75% { border-radius: 52% 48% 58% 42% / 44% 54% 46% 56%; transform: scale(1.1); }
-}
-@keyframes orb-spin {
-  to { transform: rotate(360deg); }
-}
-.orb-idle { animation: orb-breathe 4s ease-in-out infinite; }
-.orb-speaking { animation: orb-morph 1.6s ease-in-out infinite; }
-.orb-thinking { animation: orb-spin 1.4s linear infinite; }
-.orb-listening { transform: scale(calc(1 + var(--orb-level, 0) * 0.45)); transition: transform 80ms linear; }
-@media (prefers-reduced-motion: reduce) {
-  .orb-idle, .orb-speaking, .orb-thinking { animation: none; }
-}
