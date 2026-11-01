@@ -33,6 +33,11 @@ export function Chat() {
       key={rows ? `${rows.length}:${rows.at(-1)?.id}:${pending}` : "loading"}
       history={rows}
       pending={pending}
+      nextCursor={
+        history && history.nextCursor !== null
+          ? { before: history.nextCursor, compacted: !!history.nextCompacted }
+          : null
+      }
     />
   )
 }

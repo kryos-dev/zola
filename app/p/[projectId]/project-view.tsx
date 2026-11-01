@@ -1,10 +1,5 @@
 "use client"
 
-import { formatDate } from "@/app/components/history/utils"
-import { ChatInput } from "@/app/components/chat-input/chat-input"
-import { Conversation } from "@/app/components/chat/conversation"
-import { useFileUpload } from "@/app/components/chat/use-file-upload"
-import { useModel } from "@/app/components/chat/use-model"
 import { InstructionsDialog } from "@/app/p/[projectId]/_components/instructions-dialog"
 import { DialogDeleteProject } from "@/app/components/layout/sidebar/dialog-delete-project"
 import { Badge } from "@/components/ui/badge"
@@ -17,34 +12,20 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { Input } from "@/components/ui/input"
-import { Separator } from "@/components/ui/separator"
 import { Skeleton } from "@/components/ui/skeleton"
 import { toast } from "@/components/ui/toast"
-import { useChats } from "@/lib/chat-store/chats/provider"
-import type { ZolaUIMessage } from "@/lib/chat-store/messages/api"
-import { MESSAGE_MAX_LENGTH, SYSTEM_PROMPT_DEFAULT } from "@/lib/config"
-import { Attachment } from "@/lib/file-handling"
-import { API_ROUTE_CHAT } from "@/lib/routes"
-import { useUser } from "@/lib/user-store/provider"
-import { cn } from "@/lib/utils"
-import { useChat } from "@ai-sdk/react"
-import { DefaultChatTransport, type FileUIPart } from "ai"
+import { fetchClient } from "@/lib/fetch"
 import {
   ArrowLeftIcon,
   CaretDownIcon,
-  ChatTeardropTextIcon,
   DotsThreeIcon,
-  MagnifyingGlassIcon,
   PencilSimpleIcon,
   PlusIcon,
   XIcon,
 } from "@phosphor-icons/react"
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
-import { AnimatePresence, motion } from "motion/react"
 import Link from "next/link"
-import { usePathname } from "next/navigation"
-import { useCallback, useMemo, useRef, useState } from "react"
+import { useRef, useState } from "react"
 
 type Project = {
   id: string
@@ -57,20 +38,6 @@ type Project = {
 
 type ProjectViewProps = {
   projectId: string
-}
-
-function attachmentsToFileParts(attachments?: Attachment[] | null): FileUIPart[] {
-  if (!attachments?.length) return []
-  return attachments.map((attachment) => ({
-    type: "file",
-    mediaType: attachment.contentType,
-    filename: attachment.name,
-    url: attachment.url,
-  }))
-}
-
-function textPart(text: string) {
-  return { type: "text" as const, text }
 }
 
 type ProjectFile = {
@@ -242,28 +209,10 @@ function ShowMore({
 }
 
 export function ProjectView({ projectId }: ProjectViewProps) {
-  const [isSubmitting, setIsSubmitting] = useState(false)
-  const [enableSearch, setEnableSearch] = useState(false)
-  const [currentChatId, setCurrentChatId] = useState<string | null>(null)
-  const [input, setInput] = useState("")
   const [instructionsOpen, setInstructionsOpen] = useState(false)
-  const [chatSearch, setChatSearch] = useState("")
-  const [chatsExpanded, setChatsExpanded] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
-  const { user } = useUser()
-  const { createNewChat, bumpChat } = useChats()
-  const pathname = usePathname()
-  const {
-    files,
-    setFiles,
-    handleFileUploads,
-    createOptimisticAttachments,
-    cleanupOptimisticAttachments,
-    handleFileUpload,
-    handleFileRemove,
-  } = useFileUpload()
+  const queryClient = useQueryClient()
 
-  // Fetch project details
   const { data: project } = useQuery<Project>({
     queryKey: ["project", projectId],
     queryFn: async () => {
@@ -275,279 +224,38 @@ export function ProjectView({ projectId }: ProjectViewProps) {
     },
   })
 
-  // Get chats from the chat store and filter for this project
-  const { chats: allChats, isLoading: chatsLoading } = useChats()
-
-  // Filter chats for this project
-  const chats = allChats.filter((chat) => chat.project_id === projectId)
-
-  const matchingChats = useMemo(() => {
-    const q = chatSearch.trim().toLowerCase()
-    if (!q) return chats
-    return chats.filter((chat) => (chat.title ?? "").toLowerCase().includes(q))
-  }, [chats, chatSearch])
-  const shownChats = chatsExpanded
-    ? matchingChats
-    : matchingChats.slice(0, PREVIEW_ROWS)
-
-  const isAuthenticated = useMemo(() => !!user?.id, [user?.id])
-
-  // Handle errors directly in onError callback
-  const handleError = useCallback((error: Error) => {
-    let errorMsg = "Something went wrong."
-    try {
-      const parsed = JSON.parse(error.message)
-      errorMsg = parsed.error || errorMsg
-    } catch {
-      errorMsg = error.message || errorMsg
-    }
-    toast({
-      title: errorMsg,
-      status: "error",
-    })
-  }, [])
-
-  const transport = useMemo(
-    () => new DefaultChatTransport({ api: API_ROUTE_CHAT }),
-    []
-  )
-
-  const { messages, status, stop, setMessages, sendMessage } =
-    useChat<ZolaUIMessage>({
-      // Batch paints, or every token re-parses the whole reply's markdown.
-      throttle: 50,
-      id: `project-${projectId}-${currentChatId}`,
-      messages: [],
-      transport,
-      onError: handleError,
-    })
-
-  const { selectedModel, handleModelChange } = useModel({
-    currentChat: null,
-    user,
-    updateChatModel: () => Promise.resolve(),
-    chatId: null,
-  })
-
-  // Simplified ensureChatExists for authenticated project context
-  const ensureChatExists = useCallback(
-    async (userId: string) => {
-      // If we already have a current chat ID, return it
-      if (currentChatId) {
-        return currentChatId
-      }
-
-      // Only create a new chat if we haven't started one yet
-      if (messages.length === 0) {
-        try {
-          const newChat = await createNewChat(
-            userId,
-            input,
-            selectedModel,
-            true, // Always authenticated in this context
-            SYSTEM_PROMPT_DEFAULT,
-            projectId
-          )
-
-          if (!newChat) return null
-
-          setCurrentChatId(newChat.id)
-          // Redirect to the chat page as expected
-          window.history.pushState(null, "", `/c/${newChat.id}`)
-          return newChat.id
-        } catch (err: unknown) {
-          let errorMessage = "Something went wrong."
-          try {
-            const errorObj = err as { message?: string }
-            if (errorObj.message) {
-              const parsed = JSON.parse(errorObj.message)
-              errorMessage = parsed.error || errorMessage
-            }
-          } catch {
-            const errorObj = err as { message?: string }
-            errorMessage = errorObj.message || errorMessage
-          }
-          toast({
-            title: errorMessage,
-            status: "error",
-          })
-          return null
-        }
-      }
-
-      return currentChatId
+  // The project whose instructions apply to the one rolling conversation.
+  const { data: session } = useQuery<{ projectId: string | null }>({
+    queryKey: ["session"],
+    queryFn: async () => {
+      const response = await fetch("/api/session")
+      if (!response.ok) throw new Error("Failed to load session")
+      return response.json()
     },
-    [
-      currentChatId,
-      messages.length,
-      createNewChat,
-      input,
-      selectedModel,
-      projectId,
-    ]
-  )
+  })
+  const active = session?.projectId === projectId
 
-  // Simple input change handler for project context (no draft saving needed)
-  const handleInputChange = useCallback((value: string) => {
-    setInput(value)
-  }, [])
-
-  const submit = useCallback(async () => {
-    setIsSubmitting(true)
-
-    if (!user?.id) {
-      setIsSubmitting(false)
-      return
-    }
-
-    const optimisticId = `optimistic-${Date.now().toString()}`
-    const optimisticAttachments =
-      files.length > 0 ? createOptimisticAttachments(files) : []
-
-    const optimisticMessage: ZolaUIMessage = {
-      id: optimisticId,
-      role: "user",
-      parts: [textPart(input), ...attachmentsToFileParts(optimisticAttachments)],
-      metadata: { createdAt: new Date().toISOString() },
-    }
-
-    setMessages((prev) => [...prev, optimisticMessage])
-    const submittedInput = input
-    setInput("")
-
-    const submittedFiles = [...files]
-    setFiles([])
-
-    try {
-      const currentChatIdResolved = await ensureChatExists(user.id)
-      if (!currentChatIdResolved) {
-        setMessages((prev) => prev.filter((msg) => msg.id !== optimisticId))
-        cleanupOptimisticAttachments(optimisticAttachments)
-        return
-      }
-
-      if (submittedInput.length > MESSAGE_MAX_LENGTH) {
-        toast({
-          title: `The message you submitted was too long, please submit something shorter. (Max ${MESSAGE_MAX_LENGTH} characters)`,
-          status: "error",
-        })
-        setMessages((prev) => prev.filter((msg) => msg.id !== optimisticId))
-        cleanupOptimisticAttachments(optimisticAttachments)
-        return
-      }
-
-      let attachments: Attachment[] | null = []
-      if (submittedFiles.length > 0) {
-        attachments = await handleFileUploads(user.id, currentChatIdResolved)
-        if (attachments === null) {
-          setMessages((prev) => prev.filter((m) => m.id !== optimisticId))
-          cleanupOptimisticAttachments(optimisticAttachments)
-          return
-        }
-      }
-
-      setMessages((prev) => prev.filter((msg) => msg.id !== optimisticId))
-      cleanupOptimisticAttachments(optimisticAttachments)
-
-      sendMessage(
-        { text: submittedInput, files: attachmentsToFileParts(attachments) },
-        {
-          body: {
-            chatId: currentChatIdResolved,
-            userId: user.id,
-            model: selectedModel,
-            isAuthenticated: true,
-            systemPrompt: SYSTEM_PROMPT_DEFAULT,
-            enableSearch,
-          },
-        }
-      )
-
-      // Bump existing chats to top (non-blocking, after submit)
-      if (messages.length > 0) {
-        bumpChat(currentChatIdResolved)
-      }
-    } catch {
-      setMessages((prev) => prev.filter((msg) => msg.id !== optimisticId))
-      cleanupOptimisticAttachments(optimisticAttachments)
-      toast({ title: "Failed to send message", status: "error" })
-    } finally {
-      setIsSubmitting(false)
-    }
-  }, [
-    user,
-    files,
-    createOptimisticAttachments,
-    input,
-    setMessages,
-    setFiles,
-    cleanupOptimisticAttachments,
-    ensureChatExists,
-    handleFileUploads,
-    selectedModel,
-    sendMessage,
-    messages.length,
-    bumpChat,
-    enableSearch,
-  ])
-
-  // Memoize the conversation props to prevent unnecessary rerenders
-  const conversationProps = useMemo(
-    () => ({
-      messages,
-      status,
-    }),
-    [messages, status]
-  )
-
-  // Memoize the chat input props
-  const chatInputProps = useMemo(
-    () => ({
-      value: input,
-      onSuggestion: () => {},
-      onValueChange: handleInputChange,
-      onSend: submit,
-      isSubmitting,
-      files,
-      onFileUpload: handleFileUpload,
-      onFileRemove: handleFileRemove,
-      hasSuggestions: false,
-      onSelectModel: handleModelChange,
-      selectedModel,
-      isUserAuthenticated: isAuthenticated,
-      stop,
-      status,
-      setEnableSearch,
-      enableSearch,
-    }),
-    [
-      input,
-      handleInputChange,
-      submit,
-      isSubmitting,
-      files,
-      handleFileUpload,
-      handleFileRemove,
-      handleModelChange,
-      selectedModel,
-      isAuthenticated,
-      stop,
-      status,
-      setEnableSearch,
-      enableSearch,
-    ]
-  )
-
-  // Always show onboarding when on project page, regardless of messages
-  const showOnboarding = pathname === `/p/${projectId}`
+  const setActive = useMutation({
+    mutationFn: async (next: string | null) => {
+      const response = await fetchClient("/api/session/project", {
+        method: "PATCH",
+        body: JSON.stringify({ projectId: next }),
+      })
+      if (!response.ok) throw new Error("Failed to update the active project")
+    },
+    onSuccess: (_data, next) => {
+      void queryClient.invalidateQueries({ queryKey: ["session"] })
+      toast({
+        title: next ? "Using this project from your next message" : "Project cleared",
+        status: "success",
+      })
+    },
+    onError: (error: Error) => toast({ title: error.message, status: "error" }),
+  })
 
   return (
     <div className="flex h-full w-full flex-col overflow-y-auto lg:flex-row lg:overflow-hidden">
-      {/* Main column: back link, name/description, the chat itself (unchanged
-          behaviour), then this project's chat list. */}
-      {/* Only the desktop two-column layout scrolls per column. On mobile the
-          whole page is one scroller; a nested one here clipped the chat list. */}
-      <div className="flex flex-col lg:min-h-0 lg:flex-1 lg:overflow-hidden">
+      <div className="flex flex-col lg:min-h-0 lg:flex-1 lg:overflow-y-auto">
         <div className="mx-auto w-full max-w-3xl shrink-0 px-4 pt-app-header md:pt-8">
           <Button variant="ghost" size="sm" asChild className="-ml-2 mb-2">
             <Link href="/projects">
@@ -588,118 +296,24 @@ export function ProjectView({ projectId }: ProjectViewProps) {
               </DropdownMenuContent>
             </DropdownMenu>
           </div>
-        </div>
 
-        <div
-          className={cn(
-            "relative flex w-full flex-col items-center overflow-x-hidden lg:min-h-0 lg:flex-1 lg:overflow-y-auto",
-            showOnboarding && chats.length === 0
-              ? "justify-center pt-0"
-              : showOnboarding && chats.length > 0
-                ? "justify-start pt-8"
-                : "justify-end"
-          )}
-        >
-          <AnimatePresence initial={false} mode="popLayout">
-            {showOnboarding ? null : (
-              <Conversation
-                key="conversation"
-                {...conversationProps}
-                topMask={false}
-              />
-            )}
-          </AnimatePresence>
-
-          <motion.div
-            className={cn(
-              "relative inset-x-0 bottom-0 z-50 mx-auto w-full max-w-3xl"
-            )}
-            layout="position"
-            layoutId="chat-input-container"
-            transition={{
-              layout: {
-                duration: messages.length === 1 ? 0.3 : 0,
-              },
-            }}
-          >
-            <ChatInput {...chatInputProps} />
-          </motion.div>
-
-          {showOnboarding ? (
-            <div className="mx-auto w-full max-w-3xl px-4 pt-6 pb-20">
-              <div className="mb-2 flex items-center justify-between gap-3">
-                <h2 className="text-muted-foreground text-sm font-medium">
-                  Chats
-                  {chats.length > 0 ? (
-                    <span className="ml-1">· {chats.length}</span>
-                  ) : null}
-                </h2>
-                {chats.length > PREVIEW_ROWS ? (
-                  <div className="relative w-56">
-                    <MagnifyingGlassIcon
-                      size={14}
-                      className="text-muted-foreground pointer-events-none absolute top-1/2 left-2.5 -translate-y-1/2"
-                    />
-                    <Input
-                      type="search"
-                      aria-label="Search chats"
-                      value={chatSearch}
-                      onChange={(e) => setChatSearch(e.target.value)}
-                      placeholder="Search chats"
-                      className="h-8 pl-8"
-                    />
-                  </div>
-                ) : null}
-              </div>
-              {chatsLoading ? (
-                // Three rows, same height as a two-line chat row below.
-                <div className="space-y-2">
-                  <Skeleton className="h-12 w-full" />
-                  <Skeleton className="h-12 w-full" />
-                  <Skeleton className="h-12 w-full" />
-                </div>
-              ) : matchingChats.length > 0 ? (
-                <div>
-                  {shownChats.map((chat, i) => (
-                    <div key={chat.id}>
-                      {i > 0 ? <Separator /> : null}
-                      {/* Ghost button around the link: focus ring, hover and
-                          active styles come from shadcn; flex-col + text-left
-                          keep the two-line title / updated-at layout. */}
-                      <Button
-                        variant="ghost"
-                        asChild
-                        className="h-auto w-full flex-col justify-start gap-0 px-0 py-3 text-left whitespace-normal"
-                      >
-                        <Link href={`/c/${chat.id}`}>
-                          <p className="truncate text-sm font-medium">
-                            {chat.title || "Untitled Chat"}
-                          </p>
-                          <p className="text-muted-foreground text-xs font-normal">
-                            Last message {formatDate(chat.updated_at ?? chat.created_at)}
-                          </p>
-                        </Link>
-                      </Button>
-                    </div>
-                  ))}
-                  <ShowMore
-                    hidden={matchingChats.length - PREVIEW_ROWS}
-                    expanded={chatsExpanded}
-                    onToggle={() => setChatsExpanded((v) => !v)}
-                  />
-                </div>
-              ) : chats.length === 0 ? (
-                // Same empty state as the sidebar's chat list.
-                <div className="text-muted-foreground flex flex-col items-center gap-1 py-12 text-center">
-                  <ChatTeardropTextIcon size={24} className="opacity-40" />
-                  <p className="text-sm font-medium">No chats yet</p>
-                  <p className="text-13">Ask something above to start one</p>
-                </div>
-              ) : (
-                <p className="text-muted-foreground text-sm">No chat matches that.</p>
-              )}
-            </div>
-          ) : null}
+          <div className="mt-6 flex flex-wrap items-center gap-3">
+            <Button
+              disabled={!session || setActive.isPending}
+              variant={active ? "secondary" : "default"}
+              onClick={() => setActive.mutate(active ? null : projectId)}
+            >
+              {active ? "Stop using this project" : "Use this project"}
+            </Button>
+            {active ? <Badge variant="secondary">In use</Badge> : null}
+          </div>
+          <p className="text-muted-foreground mt-2 text-sm">
+            The project&apos;s instructions and files are added to the conversation
+            from your next message.{" "}
+            <Link href="/" className="underline">
+              Back to the conversation
+            </Link>
+          </p>
         </div>
       </div>
 

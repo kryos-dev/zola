@@ -3,8 +3,8 @@ import {
   ConversationContent,
   ConversationScrollButton,
 } from "@/components/ai-elements/conversation"
-import type { ZolaUIMessage } from "@/lib/chat-store/messages/api"
-import { useCallback, useRef } from "react"
+import type { ZolaUIMessage } from "@/lib/hermes/types"
+import { Fragment, useCallback, useEffect, useLayoutEffect, useRef } from "react"
 import { Shimmer } from "@/components/ai-elements/shimmer"
 import { MessageAssistant } from "./message-assistant"
 import { MessageUser } from "./message-user"
@@ -17,6 +17,20 @@ type ConversationProps = {
   // Header-height fade over the top of the list on phones. Off where the page
   // already pads for the app header, else it blanks the first message.
   topMask?: boolean
+  /** Scroll-back: older rows exist; the top sentinel asks for them. */
+  hasOlder?: boolean
+  loadingOlder?: boolean
+  onLoadOlder?: () => void
+  /** Where compacted history begins: an "Earlier" divider is drawn above this message. */
+  dividerBeforeId?: string
+}
+
+function scrollParent(el: HTMLElement | null): HTMLElement | null {
+  for (let p = el?.parentElement; p; p = p.parentElement) {
+    const overflowY = getComputedStyle(p).overflowY
+    if ((overflowY === "auto" || overflowY === "scroll") && p.scrollHeight > p.clientHeight) return p
+  }
+  return null
 }
 
 export function Conversation({
@@ -24,8 +38,44 @@ export function Conversation({
   status = "ready",
   onQuote,
   topMask = true,
+  hasOlder = false,
+  loadingOlder = false,
+  onLoadOlder,
+  dividerBeforeId,
 }: ConversationProps) {
-  const initialMessageCount = useRef(messages.length)
+  // Messages present at mount; a busy last message that is not one of them is
+  // the live reply and gets the scroll anchor.
+  const initialLastId = useRef(messages.at(-1)?.id)
+
+  // Scroll-back: when the sentinel at the top comes into view, load the next
+  // older page; after it is prepended the scroll offset is shifted by the
+  // height it added so the reader stays on the same message.
+  const sentinelRef = useRef<HTMLDivElement>(null)
+  const anchor = useRef<{ el: HTMLElement; height: number; top: number } | null>(null)
+  const onLoadOlderRef = useRef(onLoadOlder)
+  onLoadOlderRef.current = onLoadOlder
+  const firstId = messages[0]?.id
+  useEffect(() => {
+    const node = sentinelRef.current
+    if (!node || !hasOlder || loadingOlder) return
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (!entries.some((e) => e.isIntersecting)) return
+        const el = scrollParent(node)
+        if (el) anchor.current = { el, height: el.scrollHeight, top: el.scrollTop }
+        onLoadOlderRef.current?.()
+      },
+      { rootMargin: "200px 0px 0px 0px" }
+    )
+    observer.observe(node)
+    return () => observer.disconnect()
+  }, [hasOlder, loadingOlder, firstId])
+  useLayoutEffect(() => {
+    const a = anchor.current
+    if (!a) return
+    anchor.current = null
+    a.el.scrollTop = a.top + (a.el.scrollHeight - a.height)
+  }, [firstId])
   const busy = status === "submitted" || status === "streaming"
   const last = messages[messages.length - 1]
   const waiting =
@@ -63,14 +113,30 @@ export function Conversation({
           }}
         >
           <div className="mx-auto flex w-full min-w-0 max-w-3xl flex-col gap-6 px-4">
+            <div ref={sentinelRef} aria-hidden className="-mb-6 h-px" />
+            {loadingOlder && (
+              <p className="text-muted-foreground text-center text-xs">Loading earlier messages...</p>
+            )}
             {messages.map((message, index) => {
               const isLast = index === messages.length - 1
               // The anchor's min-height (about a screen) lets the new question
               // scroll to the top while its reply streams, and is dropped when
               // it ends so a short answer leaves no blank screen under it.
               const hasScrollAnchor =
-                isLast && busy && messages.length > initialMessageCount.current
+                isLast && busy && message.id !== initialLastId.current
 
+              const divider =
+                message.id === dividerBeforeId ? (
+                  <div
+                    role="separator"
+                    className="text-muted-foreground flex items-center gap-3 text-xs"
+                  >
+                    <span className="bg-border h-px flex-1" />
+                    Earlier
+                    <span className="bg-border h-px flex-1" />
+                  </div>
+                ) : null
+              const item = (() => {
               if (message.role === "user")
                 return (
                   <MessageUser
@@ -92,6 +158,13 @@ export function Conversation({
                   />
                 )
               return null
+              })()
+              return (
+                <Fragment key={message.id}>
+                  {divider}
+                  {item}
+                </Fragment>
+              )
             })}
             {/* The one placeholder: a reply is pending and nothing of it is
                 drawable yet. Same gutters as the assistant message, so the

@@ -18,7 +18,7 @@ import {
 import {
   attachmentsFromMessage,
   textFromMessage,
-} from "@/lib/chat-store/messages/api"
+} from "@/lib/hermes/types"
 import { cn } from "@/lib/utils"
 import { Check, Copy } from "@phosphor-icons/react"
 import type { UIMessage } from "ai"

@@ -12,6 +12,7 @@ const PAGE = 100
  * The user's rolling Hermes session as UI messages, newest page first. The
  * cursor is the number of rows already loaded from the end of the transcript
  * (Hermes pages with `order=latest&offset`); `nextCursor` is null at the start.
+ * `nextCompacted` says the next page must be asked with `compacted=1`.
  */
 export async function GET(request: Request) {
   const user = await getCurrentUser()
@@ -31,13 +32,15 @@ export async function GET(request: Request) {
     }
   )
   if (res.status === 404) {
-    return NextResponse.json({ messages: [], pending: false, nextCursor: null })
+    return NextResponse.json({ messages: [], pending: false, nextCursor: null, nextCompacted: false })
   }
   if (!res.ok) {
     return NextResponse.json({ error: "History unavailable" }, { status: 502 })
   }
 
   let rows = ((await res.json()) as { data: HermesRow[] }).data
+  const compacted = url.searchParams.get("compacted") === "1"
+  const fetched = rows.length
   const more = rows.length === PAGE
   // A page starts at a user row so a turn is never split across pages: the
   // leading rows of a cut turn are left for the next (older) page to include.
@@ -53,9 +56,14 @@ export async function GET(request: Request) {
     rows = rows.slice(0, lastUser + 1)
   }
 
+  // The live transcript is exhausted: carry on into compacted rows from the
+  // same offset (the client marks where they begin). Compacted rows are the
+  // end of the line.
+  const intoCompacted = !compacted && !more
   return NextResponse.json({
     messages: rowsToMessages(rows),
     pending,
-    nextCursor: more ? before + PAGE - dropped : null,
+    nextCursor: more ? before + PAGE - dropped : intoCompacted ? before + fetched : null,
+    nextCompacted: intoCompacted,
   })
 }

@@ -1,4 +1,4 @@
-import type { ZolaUIMessage } from "@/lib/chat-store/messages/api"
+import type { ZolaUIMessage } from "@/lib/hermes/types"
 import { fetchClient } from "@/lib/fetch"
 
 export type History = {
@@ -8,6 +8,8 @@ export type History = {
   pending: boolean
   /** Pass as `before` for the next older page; null at the start of the transcript. */
   nextCursor: number | null
+  /** The next page continues into compacted rows: request it with `compacted=true`. */
+  nextCompacted?: boolean
 }
 
 /** One page of the user's rolling Hermes session (see app/api/history/route.ts). */

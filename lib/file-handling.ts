@@ -106,7 +106,6 @@ export function createAttachment(file: File, url: string): Attachment {
 // ever needs to scale beyond one machine.
 export async function processFiles(
   files: File[],
-  chatId: string,
   _userId: string
 ): Promise<Attachment[]> {
   const attachments: Attachment[] = []
@@ -128,7 +127,6 @@ export async function processFiles(
     // right before sending to a model provider.
     const form = new FormData()
     form.append("file", file)
-    form.append("chatId", chatId)
 
     try {
       const res = await fetch("/api/files", {

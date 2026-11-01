@@ -1,8 +1,9 @@
 import { useCallback, useState } from "react"
 
-export function useChatDraft(chatId: string | null) {
-  const storageKey = chatId ? `chat-draft-${chatId}` : "chat-draft-new"
+// One rolling conversation, so one draft.
+const storageKey = "chat-draft"
 
+export function useChatDraft() {
   const [draftValue, setDraftValueState] = useState<string>(() => {
     if (typeof window === "undefined") return ""
     return localStorage.getItem(storageKey) || ""
@@ -20,7 +21,7 @@ export function useChatDraft(chatId: string | null) {
         }
       }
     },
-    [storageKey]
+    []
   )
 
   const clearDraft = useCallback(() => {
@@ -28,7 +29,7 @@ export function useChatDraft(chatId: string | null) {
     if (typeof window !== "undefined") {
       localStorage.removeItem(storageKey)
     }
-  }, [storageKey])
+  }, [])
 
   return {
     draftValue,

@@ -8,10 +8,8 @@ import { useWorkspace } from "@/app/components/workspace/workspace-provider"
 import { useChatDraft } from "@/app/hooks/use-chat-draft"
 import { toast } from "@/components/ui/toast"
 import { getOrCreateGuestUserId } from "@/lib/api"
-import { useChats } from "@/lib/chat-store/chats/provider"
-import { textFromMessage, type ZolaUIMessage } from "@/lib/chat-store/messages/api"
+import { textFromMessage, type ZolaUIMessage } from "@/lib/hermes/types"
 import { fetchHistory } from "@/lib/history-client"
-import { useChatSession } from "@/lib/chat-store/session/provider"
 import { MESSAGE_MAX_LENGTH, SYSTEM_PROMPT_DEFAULT } from "@/lib/config"
 import type { FileUIPart } from "ai"
 import { API_ROUTE_CHAT } from "@/lib/routes"
@@ -51,21 +49,16 @@ type ChatViewProps = {
   history: ZolaUIMessage[] | undefined
   /** The server is still running a turn for this chat. */
   pending: boolean
+  /** Where the next older page starts; null when the transcript is fully loaded. */
+  nextCursor: { before: number; compacted: boolean } | null
 }
 
-export function ChatView({ history, pending }: ChatViewProps) {
-  const { chatId } = useChatSession()
-  const { getChatById, updateChatModel } = useChats()
+export function ChatView({ history, pending, nextCursor }: ChatViewProps) {
   const { user } = useUser()
   const { preferences } = useUserPreferences()
-  const { draftValue, clearDraft, setDraftValue } = useChatDraft(chatId)
+  const { draftValue, clearDraft, setDraftValue } = useChatDraft()
   const { files, handleFileUploads, handleFileUpload, handleFileRemove } = useFileUpload()
-  const { selectedModel, handleModelChange } = useModel({
-    currentChat: (chatId && getChatById(chatId)) || null,
-    user,
-    updateChatModel,
-    chatId,
-  })
+  const { selectedModel, handleModelChange } = useModel({ user })
   const isAuthenticated = !!user?.id
   const systemPrompt = user?.system_prompt || SYSTEM_PROMPT_DEFAULT
 
@@ -75,6 +68,14 @@ export function ChatView({ history, pending }: ChatViewProps) {
   const activeTab = tabs.find((t) => t.path === activePath)
   const activeCanvas =
     activeTab?.kind === "canvas" ? { id: activeTab.id, title: activeTab.title } : null
+
+  // Scroll-back: older pages are held here, outside useChat, and shown above
+  // its list. `cursor` is null once the whole transcript is loaded.
+  const [older, setOlder] = useState<ZolaUIMessage[]>([])
+  const [cursor, setCursor] = useState(nextCursor)
+  const [loadingOlder, setLoadingOlder] = useState(false)
+  const [dividerBeforeId, setDividerBeforeId] = useState<string>()
+  const loadOlderGuard = useRef(false)
 
   const [quotedText, setQuotedText] = useState<{ text: string; messageId: string }>()
   const [input, setInput] = useState(draftValue)
@@ -220,7 +221,7 @@ export function ChatView({ history, pending }: ChatViewProps) {
       if (!uid) return
 
       // On failure the files stay attached and the text stays in the composer.
-      const attachments = await handleFileUploads(uid, SESSION_KEY)
+      const attachments = await handleFileUploads(uid)
       if (!attachments) return
 
       if (text === input) {
@@ -262,8 +263,36 @@ export function ChatView({ history, pending }: ChatViewProps) {
     [registerCanvasInstructionHandler]
   )
 
+  const allMessages = older.length ? [...older, ...messages] : messages
+  const loadOlder = async () => {
+    if (!cursor || loadOlderGuard.current) return
+    loadOlderGuard.current = true
+    setLoadingOlder(true)
+    try {
+      const page = await fetchHistory(cursor.before, cursor.compacted)
+      // The first compacted page is the boundary: everything above the
+      // divider comes from compacted history. Row-level flags do not exist.
+      if (cursor.compacted && !dividerBeforeId && page.messages.length > 0) {
+        setDividerBeforeId((older[0] ?? messages[0] ?? page.messages[0]).id)
+      }
+      const seen = new Set([...older, ...messages].map((m) => m.id))
+      setOlder([...page.messages.filter((m) => !seen.has(m.id)), ...older])
+      setCursor(
+        page.nextCursor === null
+          ? null
+          : { before: page.nextCursor, compacted: !!page.nextCompacted || cursor.compacted }
+      )
+    } catch {
+      toast({ title: "Could not load earlier messages", status: "error" })
+      setCursor(null)
+    } finally {
+      loadOlderGuard.current = false
+      setLoadingOlder(false)
+    }
+  }
+
   const lastAssistant = [...messages].reverse().find((m) => m.role === "assistant")
-  const showOnboarding = !chatId && messages.length === 0
+  const showOnboarding = messages.length === 0 && older.length === 0
 
   return (
     <div className="@container/main relative flex h-full flex-col items-center justify-end md:justify-center">
@@ -293,7 +322,11 @@ export function ChatView({ history, pending }: ChatViewProps) {
         ) : (
           <Conversation
             key="conversation"
-            messages={messages}
+            messages={allMessages}
+            hasOlder={!!cursor}
+            loadingOlder={loadingOlder}
+            onLoadOlder={() => void loadOlder()}
+            dividerBeforeId={dividerBeforeId}
             // Covers the gap between Enter and the request leaving, while the
             // chat is created and files are uploaded.
             status={isSubmitting && status === "ready" ? "submitted" : status}
@@ -320,7 +353,7 @@ export function ChatView({ history, pending }: ChatViewProps) {
           files={files}
           onFileUpload={handleFileUpload}
           onFileRemove={handleFileRemove}
-          hasSuggestions={preferences.promptSuggestions && !chatId && messages.length === 0}
+          hasSuggestions={preferences.promptSuggestions && showOnboarding}
           onSelectModel={handleModelChange}
           selectedModel={selectedModel}
           isUserAuthenticated={isAuthenticated}

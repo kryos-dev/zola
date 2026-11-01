@@ -11,9 +11,6 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
   const form = await request.formData()
-  // chatId is accepted for forward compatibility with the client's upload
-  // call but unused here — associating blobs with a chat is out of scope
-  // (no DB schema changes in this change).
   const file = form.get("file")
   if (!(file instanceof File)) {
     return NextResponse.json({ error: "Missing file" }, { status: 400 })

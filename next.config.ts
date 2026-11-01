@@ -17,6 +17,13 @@ const nextConfig: NextConfig = withBundleAnalyzer({
   experimental: {
     optimizePackageImports: ["@phosphor-icons/react"],
   },
+  // Installed-PWA deep links and old shares from the per-chat era.
+  async redirects() {
+    return [
+      { source: "/c/:path*", destination: "/", permanent: false },
+      { source: "/share/:path*", destination: "/", permanent: false },
+    ]
+  },
   async headers() {
     return [{ source: "/sw.js", headers: [{ key: "Cache-Control", value: "no-cache" }] }]
   },

@@ -9,10 +9,7 @@ import { useCallback, useState } from "react"
 export const useFileUpload = () => {
   const [files, setFiles] = useState<File[]>([])
 
-  const handleFileUploads = async (
-    uid: string,
-    chatId: string
-  ): Promise<Attachment[] | null> => {
+  const handleFileUploads = async (uid: string): Promise<Attachment[] | null> => {
     if (files.length === 0) return []
 
     try {
@@ -26,7 +23,7 @@ export const useFileUpload = () => {
     }
 
     try {
-      const processed = await processFiles(files, chatId, uid)
+      const processed = await processFiles(files, uid)
       setFiles([])
       return processed
     } catch {

@@ -12,7 +12,7 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
-import { textFromMessage } from "@/lib/chat-store/messages/api"
+import { textFromMessage } from "@/lib/hermes/types"
 import { parseCanvasSegments } from "@/lib/canvas/parse"
 import { chunkForSpeech } from "@/lib/speech-chunks"
 import { useUserPreferences } from "@/lib/user-preference-store/provider"
@@ -174,7 +174,10 @@ export const MessageAssistant = memo(function MessageAssistant({
   }, [selectionInfo, onQuote, clearSelection])
 
   // Nothing to draw yet: the conversation shows the single placeholder row.
-  if (!parts.some(isVisiblePart)) return null
+  const notices = parts.flatMap((p) =>
+    p.type === "data-notice" ? [(p as { data?: { text?: string } }).data?.text ?? ""] : []
+  )
+  if (!parts.some(isVisiblePart) && notices.length === 0) return null
 
   return (
     <Message
@@ -193,6 +196,15 @@ export const MessageAssistant = memo(function MessageAssistant({
         className="relative flex w-full min-w-0 max-w-full flex-col gap-2"
         {...(isQuoteEnabled && { "data-message-id": messageId })}
       >
+        {notices.map((text, i) => (
+          <p
+            key={`notice-${i}`}
+            role="status"
+            className="text-muted-foreground bg-muted/50 w-fit rounded-md px-2 py-1 text-xs"
+          >
+            {text}
+          </p>
+        ))}
         {toBlocks(parts).map((block, i) =>
           block.kind === "tools" ? (
             preferences.showToolInvocations ? (
