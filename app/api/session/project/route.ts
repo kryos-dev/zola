@@ -1,8 +1,8 @@
 import { getCurrentUser } from "@/lib/auth"
 import { ownsProject } from "@/lib/auth/guards"
 import { db, schema } from "@/lib/db"
-import { currentSession } from "@/lib/hermes/client"
-import { eq } from "drizzle-orm"
+import { activeSession } from "@/lib/hermes/client"
+import { and, eq } from "drizzle-orm"
 import { NextResponse } from "next/server"
 
 /** PATCH /api/session/project { projectId: string | null }: the project whose instructions apply to later turns. */
@@ -20,10 +20,12 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: "Project not found" }, { status: 404 })
   }
 
-  await currentSession(user) // make sure the row exists
+  const { profile } = await activeSession(user) // make sure the row exists
   await db
     .update(schema.userSessions)
     .set({ projectId })
-    .where(eq(schema.userSessions.userId, user.id))
+    .where(
+      and(eq(schema.userSessions.userId, user.id), eq(schema.userSessions.profile, profile))
+    )
   return NextResponse.json({ projectId })
 }

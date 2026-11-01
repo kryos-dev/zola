@@ -2,6 +2,7 @@
 
 import { ButtonTheme } from "@/app/components/layout/button-theme"
 import { HeaderSidebarTrigger } from "@/app/components/layout/header-sidebar-trigger"
+import { PersonaSwitcher } from "@/app/components/layout/persona-switcher"
 import { NewConversationButton } from "@/app/components/session/new-conversation"
 import { Badge } from "@/components/ui/badge"
 import { useSidebar } from "@/components/ui/sidebar"
@@ -52,6 +53,7 @@ export function Header({ hasSidebar }: { hasSidebar: boolean }) {
           <span className="text-foreground truncate text-sm font-semibold">
             {APP_NAME}
           </span>
+          <PersonaSwitcher />
           {project ? (
             <Link href={`/p/${project.id}`} className="min-w-0">
               <Badge variant="secondary" className="max-w-40 gap-1">

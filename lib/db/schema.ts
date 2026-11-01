@@ -103,17 +103,25 @@ export const chats = pgTable(
 )
 
 // The one rolling Hermes session each user talks to; Hermes holds the transcript.
-export const userSessions = pgTable("user_sessions", {
-  userId: uuid("user_id")
-    .primaryKey()
-    .references(() => users.id, { onDelete: "cascade" }),
-  hermesSessionId: text("hermes_session_id").notNull(),
-  projectId: uuid("project_id").references(() => projects.id, {
-    onDelete: "set null",
-  }),
-  createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
-  updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
-})
+export const userSessions = pgTable(
+  "user_sessions",
+  {
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    // Hermes profile ("persona"); one rolling session per user and profile.
+    profile: text("profile").notNull().default("default"),
+    // The persona the user is currently talking to; at most one row per user.
+    isActive: boolean("is_active").notNull().default(false),
+    hermesSessionId: text("hermes_session_id").notNull(),
+    projectId: uuid("project_id").references(() => projects.id, {
+      onDelete: "set null",
+    }),
+    createdAt: timestamp("created_at", { withTimezone: true }).defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).defaultNow(),
+  },
+  (t) => [primaryKey({ columns: [t.userId, t.profile] })]
+)
 
 export const messages = pgTable(
   "messages",

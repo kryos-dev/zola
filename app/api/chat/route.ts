@@ -1,14 +1,14 @@
 import { canvasSystemPromptAddendum } from "@/lib/canvas/prompt"
 import { SYSTEM_PROMPT_DEFAULT } from "@/lib/config"
 import { projectContext } from "@/lib/projects/context"
-import { currentSession, hermesRequest } from "@/lib/hermes/client"
+import { activeSession, hermesRequest } from "@/lib/hermes/client"
 import { hermesSessionStreamToUIMessageStream } from "@/lib/hermes/stream"
 import { beginRun, endRun, moveRun } from "@/lib/runs"
 import { THINKING_EFFORTS, THINKING_EFFORT_DEFAULT } from "@/lib/thinking-effort"
 import { getCurrentUser } from "@/lib/auth"
 import { db, schema } from "@/lib/db"
 import { createUIMessageStreamResponse, type UIMessage } from "ai"
-import { eq } from "drizzle-orm"
+import { and, eq } from "drizzle-orm"
 import { incrementMessageCount, validateAndTrackUsage } from "./api"
 import { createErrorResponse } from "./utils"
 
@@ -42,7 +42,7 @@ async function projectPromptFor(userId: string): Promise<string | null> {
       schema.projects,
       eq(schema.userSessions.projectId, schema.projects.id)
     )
-    .where(eq(schema.userSessions.userId, userId))
+    .where(and(eq(schema.userSessions.userId, userId), eq(schema.userSessions.isActive, true)))
   if (!row) return null
 
   const instructions = row.systemPrompt?.trim() || ""
@@ -107,7 +107,8 @@ ${canvasSystemPromptAddendum(canvasId ? canvasTitle : undefined)}`
     // `beginRun` queues behind whatever is still running for this session:
     // two turns on one Hermes session is what wedged it and left it unable to
     // answer anything at all.
-    let sessionId = await currentSession(user)
+    const { profile, sessionId: firstSessionId } = await activeSession(user)
+    let sessionId = firstSessionId
     const run = await beginRun(sessionId)
     if (req.signal.aborted) {
       // The client left while queued; do not start a turn nobody will read.
@@ -121,6 +122,7 @@ ${canvasSystemPromptAddendum(canvasId ? canvasTitle : undefined)}`
         message: userMessage,
         model,
         user,
+        profile,
         sessionId,
         systemPrompt: effectiveSystemPrompt,
         reasoningEffort: effort,

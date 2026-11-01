@@ -1,5 +1,5 @@
 import { getCurrentUser } from "@/lib/auth"
-import { currentSession } from "@/lib/hermes/client"
+import { activeSession } from "@/lib/hermes/client"
 import { abortRun } from "@/lib/runs"
 import { NextResponse } from "next/server"
 
@@ -17,5 +17,5 @@ export async function POST() {
   const user = await getCurrentUser()
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
-  return NextResponse.json({ aborted: abortRun(await currentSession(user)) })
+  return NextResponse.json({ aborted: abortRun((await activeSession(user)).sessionId) })
 }

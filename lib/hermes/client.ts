@@ -1,6 +1,7 @@
 import { readBlob } from "@/lib/blobs"
 import { db, schema } from "@/lib/db"
-import { eq } from "drizzle-orm"
+import { and, eq } from "drizzle-orm"
+import { DEFAULT_PROFILE, isProfile, profileBase } from "./profiles"
 import type { UIMessage } from "ai"
 
 /** The virtual model id meaning "whatever the agent is configured with". */
@@ -74,24 +75,26 @@ async function userTurnInput(message: UIMessage): Promise<string | InputPart[]> 
   return [...(text ? [{ type: "input_text" as const, text }] : []), ...images]
 }
 
-function hermesHeaders(extra?: Record<string, string>): Record<string, string> {
+function hermesHeaders(profile: string, extra?: Record<string, string>): Record<string, string> {
   return {
     "Content-Type": "application/json",
-    Authorization: `Bearer ${process.env.HERMES_API_KEY}`,
+    Authorization: `Bearer ${profileBase(profile).key}`,
     ...extra,
   }
 }
 
-/** Scopes the agent's long-term memory to the person across sessions. */
-export function sessionKeyFor(username: string): string {
+/** Scopes the agent's long-term memory to the person and persona across sessions. */
+export function sessionKeyFor(username: string, profile: string): string {
   if (!username) throw new Error("Cannot build a Hermes session key without a user")
-  return `kryos:zola:dm:${username}`
+  return `kryos:zola:${profile}:dm:${username}`
 }
 
-async function newSessionId(username: string): Promise<string> {
-  const res = await fetch(`${process.env.HERMES_API_URL}/api/sessions`, {
+async function newSessionId(username: string, profile: string): Promise<string> {
+  const res = await fetch(`${profileBase(profile).baseUrl}/api/sessions`, {
     method: "POST",
-    headers: hermesHeaders({ "X-Hermes-Session-Key": sessionKeyFor(username) }),
+    headers: hermesHeaders(profile, {
+      "X-Hermes-Session-Key": sessionKeyFor(username, profile),
+    }),
     body: "{}",
   })
   if (!res.ok) {
@@ -105,46 +108,89 @@ async function newSessionId(username: string): Promise<string> {
 
 type SessionUser = { id: string; username: string }
 
+/** The persona the user is talking to; the default when none is set or it was removed from the env. */
+export async function activeProfile(userId: string): Promise<string> {
+  const [row] = await db
+    .select({ profile: schema.userSessions.profile })
+    .from(schema.userSessions)
+    .where(and(eq(schema.userSessions.userId, userId), eq(schema.userSessions.isActive, true)))
+  return row && isProfile(row.profile) ? row.profile : DEFAULT_PROFILE
+}
+
+/** The active persona and its rolling session id. */
+export async function activeSession(user: SessionUser) {
+  const profile = await activeProfile(user.id)
+  return { profile, sessionId: await currentSession(user, profile) }
+}
+
+/** Makes `profile` the user's active persona (its session must exist). */
+export async function setActiveProfile(userId: string, profile: string): Promise<void> {
+  await db.transaction(async (tx) => {
+    await tx
+      .update(schema.userSessions)
+      .set({ isActive: false })
+      .where(eq(schema.userSessions.userId, userId))
+    await tx
+      .update(schema.userSessions)
+      .set({ isActive: true })
+      .where(and(eq(schema.userSessions.userId, userId), eq(schema.userSessions.profile, profile)))
+  })
+}
+
 /**
- * The user's current rolling Hermes session id, created on first use. Two
- * simultaneous first requests may each create a Hermes session; the insert
- * keeps one row and both read the winner (the loser's session is orphaned).
+ * The user's current rolling Hermes session id for a persona, created on first
+ * use. Two simultaneous first requests may each create a Hermes session; the
+ * insert keeps one row and both read the winner (the loser's session is
+ * orphaned).
  */
-export async function currentSession(user: SessionUser): Promise<string> {
+export async function currentSession(user: SessionUser, profile: string): Promise<string> {
   const read = async () => {
     const [row] = await db
       .select({ id: schema.userSessions.hermesSessionId })
       .from(schema.userSessions)
-      .where(eq(schema.userSessions.userId, user.id))
+      .where(
+        and(eq(schema.userSessions.userId, user.id), eq(schema.userSessions.profile, profile))
+      )
     return row?.id
   }
   const existing = await read()
   if (existing) return existing
+  const [anyRow] = await db
+    .select({ p: schema.userSessions.profile })
+    .from(schema.userSessions)
+    .where(eq(schema.userSessions.userId, user.id))
+    .limit(1)
   await db
     .insert(schema.userSessions)
-    .values({ userId: user.id, hermesSessionId: await newSessionId(user.username) })
+    .values({
+      userId: user.id,
+      profile,
+      // A user's very first session is the active one.
+      isActive: !anyRow,
+      hermesSessionId: await newSessionId(user.username, profile),
+    })
     .onConflictDoNothing()
   return (await read())!
 }
 
-/** Points the user at a fresh Hermes session and returns its id. */
-export async function replaceSession(user: SessionUser): Promise<string> {
-  const id = await newSessionId(user.username)
+/** Points the user at a fresh Hermes session for a persona and returns its id. */
+export async function replaceSession(user: SessionUser, profile: string): Promise<string> {
+  const id = await newSessionId(user.username, profile)
   await db
     .insert(schema.userSessions)
-    .values({ userId: user.id, hermesSessionId: id })
+    .values({ userId: user.id, profile, hermesSessionId: id })
     .onConflictDoUpdate({
-      target: schema.userSessions.userId,
+      target: [schema.userSessions.userId, schema.userSessions.profile],
       set: { hermesSessionId: id, updatedAt: new Date() },
     })
   return id
 }
 
 /** Best-effort removal of a chat's Hermes session; failures are ignored. */
-export async function deleteHermesSession(sessionId: string): Promise<void> {
+export async function deleteHermesSession(sessionId: string, profile: string): Promise<void> {
   await fetch(
-    `${process.env.HERMES_API_URL}/api/sessions/${encodeURIComponent(sessionId)}`,
-    { method: "DELETE", headers: hermesHeaders() }
+    `${profileBase(profile).baseUrl}/api/sessions/${encodeURIComponent(sessionId)}`,
+    { method: "DELETE", headers: hermesHeaders(profile) }
   ).catch(() => {})
 }
 
@@ -154,6 +200,7 @@ type HermesRequestArgs = {
   /** Zola model id; "hermes-agent" or empty means the agent's own default. */
   model?: string
   user: SessionUser
+  profile: string
   sessionId: string
   systemPrompt?: string
   /** none | low | medium | high | max, see lib/thinking-effort.ts */
@@ -173,6 +220,7 @@ export async function hermesRequest({
   message,
   model,
   user,
+  profile,
   sessionId,
   systemPrompt,
   reasoningEffort,
@@ -193,12 +241,12 @@ export async function hermesRequest({
   })
   const post = (id: string) =>
     fetch(
-      `${process.env.HERMES_API_URL}/api/sessions/${encodeURIComponent(id)}/chat/stream`,
+      `${profileBase(profile).baseUrl}/api/sessions/${encodeURIComponent(id)}/chat/stream`,
       {
         method: "POST",
         signal,
-        headers: hermesHeaders({
-          "X-Hermes-Session-Key": sessionKeyFor(user.username),
+        headers: hermesHeaders(profile, {
+          "X-Hermes-Session-Key": sessionKeyFor(user.username, profile),
         }),
         body,
       }
@@ -207,7 +255,7 @@ export async function hermesRequest({
   let res = await post(sessionId)
   let replaced = false
   if (res.status === 404) {
-    sessionId = await replaceSession(user)
+    sessionId = await replaceSession(user, profile)
     replaced = true
     res = await post(sessionId)
   }

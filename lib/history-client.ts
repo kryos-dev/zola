@@ -2,6 +2,8 @@ import type { ZolaUIMessage } from "@/lib/hermes/types"
 import { fetchClient } from "@/lib/fetch"
 
 export type History = {
+  /** The persona whose session this is. */
+  profile?: string
   /** Oldest first. */
   messages: ZolaUIMessage[]
   /** A turn is still running on the server; `messages` ends with its question. */

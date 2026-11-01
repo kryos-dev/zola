@@ -30,7 +30,7 @@ export function Chat() {
     <ChatView
       // Remounts when the loaded rows change (first load, or a refetch after a
       // reattach found nothing to resume), which re-seeds useChat from them.
-      key={rows ? `${rows.length}:${rows.at(-1)?.id}:${pending}` : "loading"}
+      key={rows ? `${history?.profile}:${rows.length}:${rows.at(-1)?.id}:${pending}` : "loading"}
       history={rows}
       pending={pending}
       nextCursor={

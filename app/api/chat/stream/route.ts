@@ -1,5 +1,5 @@
 import { getCurrentUser } from "@/lib/auth"
-import { currentSession } from "@/lib/hermes/client"
+import { activeSession } from "@/lib/hermes/client"
 import { getRun } from "@/lib/runs"
 import { createUIMessageStreamResponse } from "ai"
 import { NextResponse } from "next/server"
@@ -15,7 +15,7 @@ export async function GET() {
   const user = await getCurrentUser()
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
-  const run = getRun(await currentSession(user))
+  const run = getRun((await activeSession(user)).sessionId)
   if (!run) {
     return new Response(null, {
       status: 204,

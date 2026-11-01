@@ -7,6 +7,7 @@ import { useQuery } from "@tanstack/react-query"
 
 type Session = {
   sessionKey: string
+  profileLabel: string
   sessionId: string
   startedAt: string | null
 }
@@ -45,6 +46,7 @@ export default function SettingsPage() {
             and survives a new conversation; the session is the current transcript.
           </p>
           <dl className="flex flex-col gap-3">
+            <Row label="Persona" value={session?.profileLabel} />
             <Row label="Session key" value={session?.sessionKey} />
             <Row label="Session id" value={session?.sessionId} />
             <Row

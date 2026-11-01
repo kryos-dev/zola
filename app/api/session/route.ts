@@ -1,15 +1,16 @@
 import { getCurrentUser } from "@/lib/auth"
 import { db, schema } from "@/lib/db"
-import { currentSession, sessionKeyFor } from "@/lib/hermes/client"
-import { eq } from "drizzle-orm"
+import { activeSession, sessionKeyFor } from "@/lib/hermes/client"
+import { listProfiles } from "@/lib/hermes/profiles"
+import { and, eq } from "drizzle-orm"
 import { NextResponse } from "next/server"
 
-/** GET /api/session: the user's rolling session (id, memory key, start, active project). */
+/** GET /api/session: the user's rolling session for the active persona (id, memory key, start, active project). */
 export async function GET() {
   const user = await getCurrentUser()
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 })
 
-  const sessionId = await currentSession(user)
+  const { profile, sessionId } = await activeSession(user)
   const [row] = await db
     .select({
       projectId: schema.userSessions.projectId,
@@ -17,10 +18,12 @@ export async function GET() {
       updatedAt: schema.userSessions.updatedAt,
     })
     .from(schema.userSessions)
-    .where(eq(schema.userSessions.userId, user.id))
+    .where(and(eq(schema.userSessions.userId, user.id), eq(schema.userSessions.profile, profile)))
 
   return NextResponse.json({
-    sessionKey: sessionKeyFor(user.username),
+    profile,
+    profileLabel: listProfiles().find((p) => p.name === profile)?.label ?? profile,
+    sessionKey: sessionKeyFor(user.username, profile),
     sessionId,
     projectId: row?.projectId ?? null,
     // updatedAt moves when the pointer is replaced, so it is when this session began.
