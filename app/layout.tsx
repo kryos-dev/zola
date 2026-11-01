@@ -4,17 +4,15 @@ import "./globals.css"
 import { SidebarProvider } from "@/components/ui/sidebar"
 import { Toaster } from "@/components/ui/sonner"
 import { TooltipProvider } from "@/components/ui/tooltip"
-import { ChatsProvider } from "@/lib/chat-store/chats/provider"
-import { ChatSessionProvider } from "@/lib/chat-store/session/provider"
+import { APP_DOMAIN, APP_NAME } from "@/lib/config"
 import { ModelProvider } from "@/lib/model-store/provider"
 import { TanstackQueryProvider } from "@/lib/tanstack-query/tanstack-query-provider"
 import { UserPreferencesProvider } from "@/lib/user-preference-store/provider"
 import { UserProvider } from "@/lib/user-store/provider"
-import { APP_DOMAIN, APP_NAME } from "@/lib/config"
 import { getUserProfile } from "@/lib/user/api"
 import { ThemeProvider } from "next-themes"
-import { LayoutClient } from "./layout-client"
 import { PwaRegister } from "./components/pwa-register"
+import { LayoutClient } from "./layout-client"
 
 // Inter, as Linear uses. The CSS variable keeps its old name so nothing that
 // reads --font-geist-sans has to change.
@@ -70,31 +68,24 @@ export default async function RootLayout({
           <PwaRegister />
           <UserProvider initialUser={userProfile}>
             <ModelProvider>
-              <ChatsProvider userId={userProfile?.id}>
-                <ChatSessionProvider>
-                  <UserPreferencesProvider
-                    userId={userProfile?.id}
-                    initialPreferences={userProfile?.preferences}
+              <UserPreferencesProvider
+                userId={userProfile?.id}
+                initialPreferences={userProfile?.preferences}
+              >
+                <TooltipProvider delayDuration={200} skipDelayDuration={500}>
+                  <ThemeProvider
+                    attribute="class"
+                    defaultTheme="system"
+                    enableSystem
+                    disableTransitionOnChange
                   >
-                    <TooltipProvider
-                      delayDuration={200}
-                      skipDelayDuration={500}
-                    >
-                      <ThemeProvider
-                        attribute="class"
-                        defaultTheme="system"
-                        enableSystem
-                        disableTransitionOnChange
-                      >
-                        <SidebarProvider defaultOpen>
-                          <Toaster position="top-center" />
-                          {children}
-                        </SidebarProvider>
-                      </ThemeProvider>
-                    </TooltipProvider>
-                  </UserPreferencesProvider>
-                </ChatSessionProvider>
-              </ChatsProvider>
+                    <SidebarProvider defaultOpen>
+                      <Toaster position="top-center" />
+                      {children}
+                    </SidebarProvider>
+                  </ThemeProvider>
+                </TooltipProvider>
+              </UserPreferencesProvider>
             </ModelProvider>
           </UserProvider>
         </TanstackQueryProvider>

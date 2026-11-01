@@ -19,12 +19,10 @@ import {
   SidebarMenuItem,
   useSidebar,
 } from "@/components/ui/sidebar"
-import { useChats } from "@/lib/chat-store/chats/provider"
 import { APP_NAME } from "@/lib/config"
 import { signOutUser } from "@/lib/user-store/api"
 import { useUser } from "@/lib/user-store/provider"
 import {
-  ChatTeardropText,
   DotsThreeIcon,
   FolderIcon,
   PlusIcon,
@@ -35,25 +33,19 @@ import {
 import { useQuery } from "@tanstack/react-query"
 import Link from "next/link"
 import { useParams } from "next/navigation"
-import { useMemo } from "react"
-import { HistoryTrigger } from "../../history/history-trigger"
-import { NavMain, sidebarRowTriggerClassName } from "./nav-main"
-import { SidebarItem } from "./sidebar-item"
+import { NavMain } from "./nav-main"
 
 // Same shape and query as the Projects page (app/(cloud9)/projects/page.tsx)
 // so both share one react-query cache entry instead of two fetches.
 type Project = { id: string; name: string }
 
-const RECENT_CHATS_LIMIT = 12
 const SIDEBAR_PROJECTS_LIMIT = 5
 
 export function AppSidebar() {
   const isMobile = useBreakpoint(768)
   const { setOpenMobile, toggleSidebar } = useSidebar()
-  const { chats, isLoading } = useChats()
   const { user } = useUser()
-  const params = useParams<{ chatId?: string; projectId?: string }>()
-  const currentChatId = params.chatId
+  const params = useParams<{ projectId?: string }>()
 
   const { data: projects = [] } = useQuery<Project[]>({
     queryKey: ["projects"],
@@ -64,28 +56,7 @@ export function AppSidebar() {
     },
   })
 
-  // Project scope comes from WHERE you are, not from a picker: inside a
-  // project page, or inside a chat that belongs to one, the chat list shows
-  // that project's chats only; anywhere else it shows everything. There used
-  // to be an "All chats" switcher row for this, which was dropped
-  // in favour of a Projects section, copied below.
-  const scopeProjectId =
-    params.projectId ??
-    chats.find((chat) => chat.id === currentChatId)?.project_id ??
-    null
-  const scopeProject = projects.find((p) => p.id === scopeProjectId)
-
-  const visibleChats = useMemo(
-    () =>
-      scopeProjectId
-        ? chats.filter((chat) => chat.project_id === scopeProjectId)
-        : chats,
-    [chats, scopeProjectId]
-  )
-  const pinnedChats = visibleChats.filter((chat) => chat.pinned)
-  const unpinnedChats = visibleChats.filter((chat) => !chat.pinned)
-  const recentChats = unpinnedChats.slice(0, RECENT_CHATS_LIMIT)
-  const hasMoreChats = unpinnedChats.length > RECENT_CHATS_LIMIT
+  const scopeProjectId = params.projectId ?? null
 
   return (
     <Sidebar collapsible="offcanvas" variant="inset">
@@ -135,7 +106,10 @@ export function AppSidebar() {
                 ))}
                 {projects.length === 0 && (
                   <SidebarMenuItem>
-                    <SidebarMenuButton asChild className="text-muted-foreground">
+                    <SidebarMenuButton
+                      asChild
+                      className="text-muted-foreground"
+                    >
                       <Link href="/projects">
                         <PlusIcon size={16} />
                         <span>New project</span>
@@ -145,7 +119,10 @@ export function AppSidebar() {
                 )}
                 {projects.length > SIDEBAR_PROJECTS_LIMIT && (
                   <SidebarMenuItem>
-                    <SidebarMenuButton asChild className="text-muted-foreground">
+                    <SidebarMenuButton
+                      asChild
+                      className="text-muted-foreground"
+                    >
                       <Link href="/projects">
                         <DotsThreeIcon size={16} weight="bold" />
                         <span>All projects</span>
@@ -156,62 +133,6 @@ export function AppSidebar() {
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
-
-          {isLoading ? null : visibleChats.length > 0 ? (
-            <>
-              {pinnedChats.length > 0 && (
-                <SidebarGroup className="p-0">
-                  <SidebarGroupLabel>Pinned</SidebarGroupLabel>
-                  <SidebarGroupContent>
-                    <SidebarMenu>
-                      {pinnedChats.map((chat) => (
-                        <SidebarItem
-                          key={chat.id}
-                          chat={chat}
-                          currentChatId={currentChatId ?? ""}
-                        />
-                      ))}
-                    </SidebarMenu>
-                  </SidebarGroupContent>
-                </SidebarGroup>
-              )}
-              <SidebarGroup className="p-0">
-                <SidebarGroupLabel>
-                  <span className="truncate">
-                    {scopeProject ? `Chats in ${scopeProject.name}` : "Chats"}
-                  </span>
-                </SidebarGroupLabel>
-                <SidebarGroupContent>
-                  <SidebarMenu>
-                    {recentChats.map((chat) => (
-                      <SidebarItem
-                        key={chat.id}
-                        chat={chat}
-                        currentChatId={currentChatId ?? ""}
-                      />
-                    ))}
-                    {hasMoreChats && (
-                      <SidebarMenuItem>
-                        <HistoryTrigger
-                          hasSidebar={false}
-                          classNameTrigger={sidebarRowTriggerClassName}
-                          icon={<DotsThreeIcon size={16} weight="bold" />}
-                          label={<span>More</span>}
-                          hasPopover={false}
-                        />
-                      </SidebarMenuItem>
-                    )}
-                  </SidebarMenu>
-                </SidebarGroupContent>
-              </SidebarGroup>
-            </>
-          ) : (
-            <div className="text-muted-foreground flex flex-col items-center gap-1 py-12 text-center">
-              <ChatTeardropText size={24} className="opacity-40" />
-              <p className="text-sm font-medium">No chats yet</p>
-              <p className="text-13">Start a new conversation</p>
-            </div>
-          )}
         </ScrollArea>
       </SidebarContent>
 

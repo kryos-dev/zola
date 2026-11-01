@@ -30,7 +30,6 @@ import {
 import { ChevronDownIcon } from "lucide-react"
 import { memo, useCallback, useEffect, useRef, useState } from "react"
 import { CanvasBlock } from "./canvas-block"
-import { MessageFeedback } from "./message-feedback"
 import { QuoteButton } from "./quote-button"
 import { ToolInvocation } from "./tool-invocation"
 import { turnFromParts } from "@/lib/turn"
@@ -274,7 +273,6 @@ export const MessageAssistant = memo(function MessageAssistant({
               <FileText className="size-4" />
             </MessageAction>
             <ReadAloudAction text={answerText} />
-            <MessageFeedback messageId={messageId} />
           </MessageActions>
         )}
 

@@ -75,10 +75,10 @@ function makeBuffer() {
 }
 
 /** Start tracking a turn. Waits for the chat's running turn, if any, to end. */
-export async function beginRun(chatId: string): Promise<Run> {
+export async function beginRun(sessionId: string): Promise<Run> {
   // A loop, not a single await: when several sends are queued, only the first
   // to wake registers; the rest see its run and keep waiting.
-  while (runs.get(chatId)) await runs.get(chatId)!.done
+  while (runs.get(sessionId)) await runs.get(sessionId)!.done
   let finish!: () => void
   const done = new Promise<void>((resolve) => (finish = resolve))
   const buffer = makeBuffer()
@@ -92,18 +92,18 @@ export async function beginRun(chatId: string): Promise<Run> {
     publish: buffer.publish,
     subscribe: buffer.subscribe,
   }
-  runs.set(chatId, run)
+  runs.set(sessionId, run)
   return run
 }
 
 /** The chat's running turn, if any. */
-export function getRun(chatId: string): Run | undefined {
-  return runs.get(chatId)
+export function getRun(sessionId: string): Run | undefined {
+  return runs.get(sessionId)
 }
 
 /** Whether a turn is currently running for the chat. */
-export function hasRun(chatId: string): boolean {
-  return runs.has(chatId)
+export function hasRun(sessionId: string): boolean {
+  return runs.has(sessionId)
 }
 
 /**
@@ -111,8 +111,8 @@ export function hasRun(chatId: string): boolean {
  * The run stays registered: aborting ends the Hermes stream, the partial reply
  * is saved, and only then does `endRun` release it.
  */
-export function abortRun(chatId: string): boolean {
-  const run = runs.get(chatId)
+export function abortRun(sessionId: string): boolean {
+  const run = runs.get(sessionId)
   if (!run) return false
   run.controller.abort()
   return true
@@ -125,8 +125,8 @@ export function moveRun(from: string, to: string, run: Run): void {
 }
 
 /** Stop tracking a turn, but only if `run` is still the current one. */
-export function endRun(chatId: string, run: Run): void {
-  if (runs.get(chatId) === run) runs.delete(chatId)
+export function endRun(sessionId: string, run: Run): void {
+  if (runs.get(sessionId) === run) runs.delete(sessionId)
   run.finish()
 }
 

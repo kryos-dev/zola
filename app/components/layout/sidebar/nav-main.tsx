@@ -5,21 +5,20 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
 } from "@/components/ui/sidebar"
+import { useUser } from "@/lib/user-store/provider"
 import {
   ClockCounterClockwiseIcon,
   FolderIcon,
+  GearIcon,
   ImagesIcon,
-  MagnifyingGlass,
   NotePencilIcon,
   PlugsConnectedIcon,
   PuzzlePieceIcon,
 } from "@phosphor-icons/react"
-import { useUser } from "@/lib/user-store/provider"
 import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { HistoryTrigger } from "../../history/history-trigger"
 
-// Claude's order: Projects, Customize (skills + connectors on one page),
+// Claude's order: Projects, Settings, Customize (skills + connectors on one page),
 // Scheduled.
 //
 // The admin ones drive the agent for everyone on the box -- its skills, its
@@ -28,23 +27,29 @@ import { HistoryTrigger } from "../../history/history-trigger"
 // guest; hiding them is presentation, not the check.
 const NAV_ITEMS = [
   { href: "/projects", label: "Projects", icon: FolderIcon },
+  { href: "/settings", label: "Settings", icon: GearIcon },
   // The image library (apps/menaka) is its own app on its own host; the
   // sidebar is where people look for it.
   { href: "https://menaka.kryos.dev", label: "Images", icon: ImagesIcon },
-  { href: "/customize", label: "Customize", icon: PuzzlePieceIcon, admin: true },
+  {
+    href: "/customize",
+    label: "Customize",
+    icon: PuzzlePieceIcon,
+    admin: true,
+  },
   {
     href: "/scheduled",
     label: "Scheduled",
     icon: ClockCounterClockwiseIcon,
     admin: true,
   },
-  { href: "/providers", label: "Providers", icon: PlugsConnectedIcon, admin: true },
+  {
+    href: "/providers",
+    label: "Providers",
+    icon: PlugsConnectedIcon,
+    admin: true,
+  },
 ]
-
-// Mirrors sidebarMenuButtonVariants({ size: "default" }) since HistoryTrigger
-// renders its own <button> and can't be wrapped with SidebarMenuButton asChild.
-export const sidebarRowTriggerClassName =
-  "peer/menu-button bg-transparent text-sidebar-foreground flex h-8 w-full items-center gap-2 overflow-hidden rounded-md p-2 text-left text-sm outline-hidden ring-sidebar-ring transition-[width,height,padding] hover:bg-sidebar-accent hover:text-sidebar-accent-foreground focus-visible:ring-2 active:bg-sidebar-accent active:text-sidebar-accent-foreground [&>svg]:size-4 [&>svg]:shrink-0"
 
 export function NavMain() {
   const pathname = usePathname()
@@ -56,22 +61,13 @@ export function NavMain() {
         <SidebarMenuButton
           asChild
           isActive={pathname === "/"}
-          tooltip="New chat"
+          tooltip="Conversation"
         >
           <Link href="/" prefetch>
             <NotePencilIcon size={16} />
-            <span>New chat</span>
+            <span>Conversation</span>
           </Link>
         </SidebarMenuButton>
-      </SidebarMenuItem>
-      <SidebarMenuItem>
-        <HistoryTrigger
-          hasSidebar={false}
-          classNameTrigger={sidebarRowTriggerClassName}
-          icon={<MagnifyingGlass size={16} />}
-          label={<span>Search</span>}
-          hasPopover={false}
-        />
       </SidebarMenuItem>
       {NAV_ITEMS.filter((item) => !item.admin || user?.is_admin).map((item) => {
         const isActive = pathname?.startsWith(item.href)

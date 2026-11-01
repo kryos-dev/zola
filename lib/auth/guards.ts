@@ -52,26 +52,6 @@ export async function requireAdmin(): Promise<
   return (await isAdminRequest()) ? { user } : { response: forbidden() }
 }
 
-/** The owner of this chat, or null when no such chat exists. */
-export async function chatOwnerId(chatId: string): Promise<string | null> {
-  const [row] = await db
-    .select({ userId: schema.chats.userId })
-    .from(schema.chats)
-    .where(eq(schema.chats.id, chatId))
-    .limit(1)
-  return row?.userId ?? null
-}
-
-/** True when this chat exists and belongs to this person. */
-export async function ownsChat(chatId: string, userId: string): Promise<boolean> {
-  const [row] = await db
-    .select({ id: schema.chats.id })
-    .from(schema.chats)
-    .where(and(eq(schema.chats.id, chatId), eq(schema.chats.userId, userId)))
-    .limit(1)
-  return Boolean(row)
-}
-
 /** True when this project exists and belongs to this person. */
 export async function ownsProject(
   projectId: string,

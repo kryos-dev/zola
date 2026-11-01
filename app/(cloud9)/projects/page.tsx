@@ -2,7 +2,7 @@
 
 // Claude-style projects list: search + sort over a card grid.
 
-import { formatDate } from "@/app/components/history/utils"
+import { formatDate } from "@/lib/format-date"
 import { DialogDeleteProject } from "@/app/components/layout/sidebar/dialog-delete-project"
 import { InstructionsDialog } from "@/app/p/[projectId]/_components/instructions-dialog"
 import { Button } from "@/components/ui/button"

@@ -1,5 +1,4 @@
 import type { UserProfile } from "@/lib/user/types"
-import { fetchClient } from "./fetch"
 
 export class UsageLimitError extends Error {
   code: string
@@ -17,29 +16,3 @@ export class UsageLimitError extends Error {
 export const getOrCreateGuestUserId = async (
   user: UserProfile | null
 ): Promise<string | null> => user?.id ?? null
-
-/**
- * Updates the model for an existing chat
- */
-export async function updateChatModel(chatId: string, model: string) {
-  try {
-    const res = await fetchClient(`/api/chats/${chatId}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ model }),
-    })
-    const responseData = await res.json()
-
-    if (!res.ok) {
-      throw new Error(
-        responseData.error ||
-          `Failed to update chat model: ${res.status} ${res.statusText}`
-      )
-    }
-
-    return responseData
-  } catch (error) {
-    console.error("Error updating chat model:", error)
-    throw error
-  }
-}
